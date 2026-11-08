@@ -1,7 +1,7 @@
-import {readFile, readdir, stat} from 'node:fs/promises';
+import {readFile, readdir, stat, mkdtemp, copyFile, rm} from 'node:fs/promises';
 import {spawnSync} from 'node:child_process';
 import {createHash, createPublicKey, verify} from 'node:crypto';
-import {homedir} from 'node:os';
+import {homedir, tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {repository, publicKey} from './configure-updates.mjs';
@@ -72,7 +72,15 @@ async function main() {
   if (!existing) run('gh', ['release', 'create', tag, '--repo', repo, '--draft', '--verify-tag', '--title', tag, '--generate-notes', ...(version.includes('-') ? ['--prerelease'] : [])], ghEnv, true);
   const state = JSON.parse(run('gh', ['release', 'view', tag, '--repo', repo, '--json', 'isDraft'], ghEnv, true));
   if (!state.isDraft) throw Error('目标不是草稿，停止上传');
-  run('gh', ['release', 'upload', tag, ...assets, '--repo', repo, '--clobber'], ghEnv, true);
+  // GitHub normalizes non-ASCII asset names. Upload an ASCII basename while
+  // retaining the Chinese local DMG name; the temporary copy is always removed.
+  const staging = await mkdtemp(join(tmpdir(), 'xiaoyuzhou-release-'));
+  try {
+    const installer = join(staging, `xiaoyuzhou-menubar-${version}-AppleSilicon.dmg`);
+    await copyFile(assets[0], installer);
+    assets[0] = installer;
+    run('gh', ['release', 'upload', tag, ...assets, '--repo', repo, '--clobber'], ghEnv, true);
+  } finally { await rm(staging, {recursive: true, force: true}); }
   console.log(`已上传 ${repo} ${tag} 草稿；请人工检查后发布。`);
 }
 main().catch(error => {
