@@ -1,14 +1,9 @@
 package main
 
 import (
-	"bytes"
 	_ "embed"
 	"fmt"
-	"image"
-	"image/color"
-	"image/png"
 	"log"
-	"math"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -16,6 +11,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo"
+	"xiaoyuzhou-menubar/internal/appicon"
 	"xiaoyuzhou-menubar/internal/appupdate"
 	"xiaoyuzhou-menubar/internal/player"
 )
@@ -136,46 +132,7 @@ func (b *Backend) ready() {
 
 }
 
-// A monochrome planet with a tilted orbit. Transparent separation keeps the
-// foreground orbit readable when macOS tints the template white or dark.
-func trayIcon() []byte {
-	const size = 36
-	const samples = 8
-	const angle = -38 * math.Pi / 180
-	c, s := math.Cos(angle), math.Sin(angle)
-	img := image.NewNRGBA(image.Rect(0, 0, size, size))
-	for y := 0; y < size; y++ {
-		for x := 0; x < size; x++ {
-			covered := 0
-			for sy := 0; sy < samples; sy++ {
-				for sx := 0; sx < samples; sx++ {
-					dx := float64(x) + (float64(sx)+0.5)/samples - size/2
-					dy := float64(y) + (float64(sy)+0.5)/samples - size/2
-					u, v := c*dx+s*dy, -s*dx+c*dy
-					const a, b = 17.0, 4.8
-					gradient := 2 * math.Hypot(u/(a*a), v/(b*b))
-					distance := math.Inf(1)
-					if gradient > 0 {
-						distance = math.Abs((u*u/(a*a) + v*v/(b*b) - 1) / gradient)
-					}
-					planet := dx*dx+dy*dy <= 10.5*10.5
-					orbit := distance <= 0.85
-					// The back arc passes behind the planet; the front arc gets a clear gap.
-					if planet && v > 0 && distance < 1.9 {
-						planet = false
-					}
-					if planet || orbit {
-						covered++
-					}
-				}
-			}
-			img.SetNRGBA(x, y, color.NRGBA{R: 255, G: 255, B: 255, A: uint8(covered * 255 / (samples * samples))})
-		}
-	}
-	var out bytes.Buffer
-	_ = png.Encode(&out, img)
-	return out.Bytes()
-}
+func trayIcon() []byte { return appicon.TemplatePNG() }
 
 func main() {
 	home, _ := os.UserHomeDir()

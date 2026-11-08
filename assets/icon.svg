@@ -1,14 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Xiaoyuzhou podcasts">
-  <defs>
-    <linearGradient id="xyzGrad" x1="8" y1="6" x2="56" y2="58" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#5B6BF5"/>
-      <stop offset="1" stop-color="#2C1E8A"/>
-    </linearGradient>
-  </defs>
-  <rect x="2" y="2" width="60" height="60" rx="16" fill="url(#xyzGrad)"/>
-  <circle cx="32" cy="32" r="4.6" fill="#FFFFFF"/>
-  <path d="M23.4 23.4a12.2 12.2 0 0 0 0 17.2" fill="none" stroke="#FFFFFF" stroke-width="3.4" stroke-linecap="round" opacity="0.92"/>
-  <path d="M40.6 23.4a12.2 12.2 0 0 1 0 17.2" fill="none" stroke="#FFFFFF" stroke-width="3.4" stroke-linecap="round" opacity="0.92"/>
-  <path d="M17.6 17.6a20.4 20.4 0 0 0 0 28.8" fill="none" stroke="#FFFFFF" stroke-width="3.2" stroke-linecap="round" opacity="0.5"/>
-  <path d="M46.4 17.6a20.4 20.4 0 0 1 0 28.8" fill="none" stroke="#FFFFFF" stroke-width="3.2" stroke-linecap="round" opacity="0.5"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="1024" height="1024" aria-label="小宇宙菜单栏星球图标">
+<defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#5b6bf5"/><stop offset="1" stop-color="#2c1e8a"/></linearGradient><mask id="gap"><rect x="-24" y="-24" width="48" height="48" fill="white"/><path d="M-17 0 A17 4.8 0 0 0 17 0" transform="rotate(-38)" stroke="black" stroke-width="3.8" fill="none"/></mask></defs>
+<rect x="2" y="2" width="60" height="60" rx="16" fill="url(#bg)"/>
+<g transform="translate(32 32) scale(1.375)"><ellipse rx="17" ry="4.8" transform="rotate(-38)" fill="none" stroke="white" stroke-width="1.7"/><circle r="10.5" fill="white" mask="url(#gap)"/><path d="M-17 0 A17 4.8 0 0 0 17 0" transform="rotate(-38)" stroke="white" stroke-width="1.7" fill="none"/></g>
 </svg>

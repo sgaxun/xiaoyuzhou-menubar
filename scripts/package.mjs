@@ -10,6 +10,7 @@ const go=process.env.MYGO_GO||'go';
 const buildEnv={...process.env};
 if(buildEnv.MYGO_UPDATER_PRIVATE_KEY_FILE){if(buildEnv.MYGO_UPDATER_PRIVATE_KEY)throw Error('签名密钥来源只能设置一个');buildEnv.MYGO_UPDATER_PRIVATE_KEY=(await readFile(buildEnv.MYGO_UPDATER_PRIVATE_KEY_FILE,'utf8')).trim();delete buildEnv.MYGO_UPDATER_PRIVATE_KEY_FILE;}
 function run(cmd,args){const p=spawnSync(cmd,args,{cwd:root,stdio:'inherit',env:buildEnv});if(p.error)throw p.error;if(p.status!==0)throw Error(`${cmd} failed (${p.status})`)}
+run(go,['run','./scripts/icon']);
 run('npm',['run','build:ui']);
 // Build from a clean staging directory; Node is only a build-time tool.
 await rm(join(root,'resources/bin'),{recursive:true,force:true});
