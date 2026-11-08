@@ -285,8 +285,22 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
       // 链接失效后自动换新链接的重试次数（每个单集最多 2 次，避免死循环）
       const retryRef = useRef({});
 
+      // Show the saved resume point before loading audio, without autoplaying.
+      useEffect(() => {
+        const audio=audioRef.current;
+        if(current?.eid && audio?.dataset.xyzEid===current.eid && audio.readyState>0)return;
+        const saved=Number(progressRef.current?.[current?.eid]?.position)||Number(current?.resumeAt)||0;
+        const total=Number(current?.duration)||0;
+        setPosition(Math.max(0,total>0?Math.min(saved,total):saved));
+        setDuration(0);
+      }, [current?.eid]);
+
       const sendProgress = useCallback((ep, pos, forced) => {
         if (!ep || !ep.eid) return;
+        if(Number.isFinite(pos)) {
+          const previous=Number(progressRef.current?.[ep.eid]?.position)||0;
+          progressRef.current[ep.eid]={position:Math.max(previous,pos)};
+        }
         const now = Date.now();
         if (!forced && now - lastSent.current < 15000) return;
         lastSent.current = now;
@@ -714,7 +728,7 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
         // 进度条
         h(
           'div',
-          { className: 'xyz-seek', role: 'slider', tabIndex: 0, 'aria-label': '播放进度', onClick: seek },
+          { className: 'xyz-seek', role: 'slider', tabIndex: 0, 'aria-label': '播放进度', 'aria-valuemin':0, 'aria-valuemax':total, 'aria-valuenow':Math.min(position,total)||0, 'aria-valuetext':`${mmss(position)} / ${mmss(total)}`, title:`${playing?'当前进度':'续播位置'}：${mmss(position)} / ${mmss(total)}`, onClick: duration>0?seek:undefined },
           h('i', { style: { width: `${pct}%` } }),
         ),
 
@@ -855,10 +869,10 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
     }
 
     function Panel(props) {
-      const { player, onClose, initialTab, updates, updateFocus } = props;
+      const { player, onClose, initialTab, updates, navigationRevision } = props;
       const showNotes=React.useContext(NotesContext);
       const [tab, setTab] = useState(initialTab || 'queue');
-      useEffect(()=>setTab(initialTab||'queue'),[initialTab,updateFocus]);
+      useEffect(()=>setTab(initialTab||'queue'),[initialTab,navigationRevision]);
       const [state, setState] = useState(null);
       const [loggedIn, setLoggedIn] = useState(false);
       const [loading, setLoading] = useState(false);
@@ -1779,7 +1793,6 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
                 'div',
                 { style: { display: 'flex', flexDirection: 'column', gap: 14 } },
 
-                h(UpdateSettings,{updates,player}),
                 // —— 账户 ——
                 h('div',{className:'xyz-section'},
                   h('div',{className:'xyz-section-title'},'账户'),
@@ -1870,6 +1883,7 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
                     '播放列表和倍速设置保存在本机，不会因为刷新或更新程序而丢失。',
                   ),
                 ),
+                h(UpdateSettings,{updates,player}),
               )
             : null,
         ),
@@ -1903,7 +1917,7 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
           const wide = props?.wide !== false;
           const player = usePlayer();
           const updates = useUpdates();
-          const [updateFocus,setUpdateFocus]=useState(0);
+          const [navigationRevision,setNavigationRevision]=useState(0);
           const [open, setOpen] = useState(true);
           const [tab, setTab] = useState('queue');
           const [notesOpen,setNotesOpen]=useState(false);
@@ -2017,10 +2031,11 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
                 setNotesOpen(false);
                 setOpen(true);
                 setTab('queue');
+                setNavigationRevision(v=>v+1);
               },
             }),
-            h(UpdateBanner,{updates,onOpen:()=>{setNotesOpen(false);setOpen(true);setTab('settings');setUpdateFocus(v=>v+1)}}),
-            h('div',{className:'xyz-content',hidden:notesOpen},open ? h(Panel, { player, updates,updateFocus, initialTab: tab, onClose: () => window.mygo.call('Backend.Hide') }) : null),
+            h(UpdateBanner,{updates,onOpen:()=>{setNotesOpen(false);setOpen(true);setTab('settings');setNavigationRevision(v=>v+1)}}),
+            h('div',{className:'xyz-content',hidden:notesOpen},open ? h(Panel, { player, updates,navigationRevision, initialTab: tab, onClose: () => window.mygo.call('Backend.Hide') }) : null),
             notesOpen ? h(EpisodeNotes,{episode:notesEpisode,onClose:()=>setNotesOpen(false)}) : null,
           );
         }

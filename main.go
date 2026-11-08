@@ -8,6 +8,7 @@ import (
 	"image/color"
 	"image/png"
 	"log"
+	"math"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -135,19 +136,44 @@ func (b *Backend) ready() {
 
 }
 
+// A monochrome planet with a tilted orbit. Transparent separation keeps the
+// foreground orbit readable when macOS tints the template white or dark.
 func trayIcon() []byte {
-	img := image.NewNRGBA(image.Rect(0, 0, 36, 36))
-	for y := 0; y < 36; y++ {
-		for x := 0; x < 36; x++ {
-			dx, dy := float64(x)-17.5, float64(y)-17.5
-			d := dx*dx + dy*dy
-			if d < 13 || (d > 90 && d < 132 && (dx > 5 || dx < -5)) || (d > 222 && d < 278 && (dx > 10 || dx < -10)) {
-				img.Set(x, y, color.NRGBA{A: 255})
+	const size = 36
+	const samples = 8
+	const angle = -38 * math.Pi / 180
+	c, s := math.Cos(angle), math.Sin(angle)
+	img := image.NewNRGBA(image.Rect(0, 0, size, size))
+	for y := 0; y < size; y++ {
+		for x := 0; x < size; x++ {
+			covered := 0
+			for sy := 0; sy < samples; sy++ {
+				for sx := 0; sx < samples; sx++ {
+					dx := float64(x) + (float64(sx)+0.5)/samples - size/2
+					dy := float64(y) + (float64(sy)+0.5)/samples - size/2
+					u, v := c*dx+s*dy, -s*dx+c*dy
+					const a, b = 17.0, 4.8
+					gradient := 2 * math.Hypot(u/(a*a), v/(b*b))
+					distance := math.Inf(1)
+					if gradient > 0 {
+						distance = math.Abs((u*u/(a*a) + v*v/(b*b) - 1) / gradient)
+					}
+					planet := dx*dx+dy*dy <= 10.5*10.5
+					orbit := distance <= 0.85
+					// The back arc passes behind the planet; the front arc gets a clear gap.
+					if planet && v > 0 && distance < 1.9 {
+						planet = false
+					}
+					if planet || orbit {
+						covered++
+					}
+				}
 			}
+			img.SetNRGBA(x, y, color.NRGBA{R: 255, G: 255, B: 255, A: uint8(covered * 255 / (samples * samples))})
 		}
 	}
 	var out bytes.Buffer
-	png.Encode(&out, img)
+	_ = png.Encode(&out, img)
 	return out.Bytes()
 }
 

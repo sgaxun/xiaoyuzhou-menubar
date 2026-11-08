@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 36 36" aria-label="小宇宙菜单栏星球图标">
+ <defs><mask id="front-gap"><rect width="36" height="36" fill="white"/><path d="M-17 0 A17 4.8 0 0 0 17 0" transform="translate(18 18) rotate(-38)" stroke="black" stroke-width="3.8" fill="none"/></mask></defs>
+ <ellipse cx="18" cy="18" rx="17" ry="4.8" transform="rotate(-38 18 18)" fill="none" stroke="white" stroke-width="1.7"/>
+ <circle cx="18" cy="18" r="10.5" fill="white" mask="url(#front-gap)"/>
+ <path d="M-17 0 A17 4.8 0 0 0 17 0" transform="translate(18 18) rotate(-38)" stroke="white" stroke-width="1.7" fill="none"/>
+</svg>
