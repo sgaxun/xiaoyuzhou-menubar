@@ -1,0 +1,19 @@
+node_modules/
+/build/
+/release/
+/.mygo/
+/assets/player.html
+/work/
+*.dmg
+*.log
+.DS_Store
+.env
+.env.*
+credentials*.json
+state.json
+cache.json
+
+# Signing keys belong outside the repository.
+*.key
+*.pem
+/update-keys/

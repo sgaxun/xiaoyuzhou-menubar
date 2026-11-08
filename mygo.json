@@ -1,0 +1,17 @@
+{
+  "name": "小宇宙菜单栏",
+  "identifier": "dev.sgaxun.xiaoyuzhou-menubar",
+  "version": "0.3.0",
+  "out": "build",
+  "icon": "resources/icon.png",
+  "macos": {
+    "infoPlist": {
+      "LSUIElement": true
+    }
+  },
+  "updates": {
+    "github": "sgaxun/xiaoyuzhou-menubar",
+    "publicKey": "FIjEkm0aBlT2fKHplH0bcw0kPejm2G0DiPW4PNq7Hkk=",
+    "deltas": 0
+  }
+}
