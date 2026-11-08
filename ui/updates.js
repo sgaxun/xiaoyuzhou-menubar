@@ -102,25 +102,32 @@ export function UpdateSettings({updates, player}) {
   const downloaded = Math.max(0, Number(status.downloaded) || 0);
   const total = Math.max(0, Number(status.total) || 0);
   const percent = total ? Math.min(100, Math.round(downloaded / total * 100)) : null;
-  const row = (label, control) => h('div', {className: 'xyz-setting-row'},
-    h('div', {className: 'xyz-setting-name'}, label), control);
-  const button = (label, onClick, disabled = working) => h('button', {
-    type: 'button', className: 'xyz-btn', disabled, onClick,
-  }, label);
-  return h('div', {className: 'xyz-section'},
-    h('div', {className: 'xyz-section-title'}, '软件更新'),
-    row('当前版本', h('span', null, status.version || '读取中…')),
-    row('自动检查更新', h('input', {
-      type: 'checkbox', 'aria-label': '自动检查更新', checked: !!status.automatic,
-      disabled: working || !status.enabled,
-      onChange: event => updates.setAutomatic(event.target.checked),
-    })),
-    row(status.phase === 'current' ? '已是最新版本' : '检查新版本',
-      button(status.phase === 'checking' ? '检查中…' : '检查更新', updates.check,
-        working || status.phase === 'disabled')),
-    status.phase === 'disabled' && h('div', {className: 'xyz-setting-desc'}, status.message || '此版本不支持在线更新'),
-    status.availableVersion && h('div', null, `新版本 ${status.availableVersion}`),
-    status.notes && h('div', {className: 'xyz-setting-desc', style: {whiteSpace: 'pre-wrap', overflowWrap: 'anywhere'}}, status.notes),
+  const [linkError,setLinkError]=useState('');
+  const openRepository=async()=>{
+    setLinkError('');
+    try{await window.mygo.call('Backend.OpenLink','https://github.com/sgaxun/xiaoyuzhou-menubar')}
+    catch{setLinkError('仓库链接未能打开，请重试。')}
+  };
+  const action = status.phase==='ready'
+    ? ['重启安装',()=>updates.restart(player),'保存进度并重启安装']
+    : status.phase==='available'
+      ? ['下载更新',updates.download,'下载更新']
+      : failure
+        ? ['重试',error?updates.refresh:status.availableVersion?updates.download:updates.check,'重试更新']
+        : [status.phase==='checking'?'检查中…':status.phase==='downloading'?'下载中…':'检查更新',updates.check,'检查更新'];
+  const subtitle = failure ? '' : ({current:'已是最新版本',checking:'正在检查新版本…',available:`可更新至 ${status.availableVersion}`,downloading:`正在获取 ${status.availableVersion||'新版本'}`,ready:'更新已就绪，重启后安装',disabled:status.message||'当前无法在线更新'}[status.phase]||'保持应用为最新版本');
+  const divider={borderTop:'1px solid var(--app-border)',paddingTop:10};
+  return h('section', {className:'xyz-section','aria-label':'软件更新'},
+    h('div', {className:'xyz-section-title'},'软件更新'),
+    h('div',{style:{background:'var(--app-hover)',border:'1px solid var(--app-border)',borderRadius:10,padding:12,display:'flex',flexDirection:'column',gap:12}},
+      h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',gap:12}},
+        h('div',{style:{display:'flex',flexDirection:'column',gap:4,minWidth:0}},
+          h('div',{style:{fontSize:13,fontWeight:600}},`版本 ${status.version||'读取中…'}`),
+          subtitle?h('div',{style:{fontSize:11,opacity:.6}},subtitle):null),
+        h('button',{type:'button',className:'xyz-btn',title:action[2],disabled:working||status.phase==='disabled',onClick:action[1],style:{flexShrink:0,border:'1px solid var(--app-border)',padding:'5px 10px'}},action[0])),
+      status.notes&&status.availableVersion?h('details',{style:{fontSize:11,...divider}},
+        h('summary',{style:{cursor:'pointer',opacity:.7}},'更新说明'),
+        h('div',{style:{whiteSpace:'pre-wrap',overflowWrap:'anywhere',lineHeight:1.7,opacity:.75,paddingTop:8}},status.notes)):null,
     status.phase === 'downloading' && h('div', {style:{display:'flex',flexDirection:'column',gap:8,padding:'12px 0'}},
       h('div',{style:{display:'flex',justifyContent:'space-between',fontSize:12}},
         h('span',null,'正在下载更新'),
@@ -133,11 +140,17 @@ export function UpdateSettings({updates, player}) {
         h('span',null,total?`${formatDownloadSize(Math.min(downloaded,total),total)} / ${formatDownloadSize(total)}`:formatDownloadSize(downloaded)),
         h('span',null,'下载后自动校验')),
       percent===null?h('style',null,'@keyframes xyz-update-indeterminate{0%{transform:translateX(-100%)}100%{transform:translateX(430%)}}'):null),
-    status.phase === 'available' && button('下载更新', updates.download),
-    status.phase === 'ready' && button('保存进度并重启安装', () => updates.restart(player)),
-    !failure && status.message && status.phase !== 'disabled' && status.phase !== 'downloading' && h('div', {className: 'xyz-setting-desc'}, status.message),
-    failure && h('div', {role: 'status'},
-      h('div', null, failure), button('重试', error ? updates.refresh : status.availableVersion ? updates.download : updates.check, busy)),
+      failure?h('div',{role:'status',style:{fontSize:11,lineHeight:1.5}},failure):null,
+      h('div',{style:{...divider,display:'flex',alignItems:'center',justifyContent:'space-between',gap:12}},
+        h('label',{style:{display:'flex',alignItems:'center',gap:8,fontSize:11,cursor:'pointer'}},
+          h('button',{type:'button',role:'switch','aria-label':'自动检查更新','aria-checked':!!status.automatic,disabled:working||!status.enabled,
+            onClick:()=>updates.setAutomatic(!status.automatic),
+            style:{width:30,height:18,padding:2,border:0,borderRadius:10,background:status.automatic?'var(--app-fg)':'var(--app-track)',cursor:'inherit',opacity:(working||!status.enabled)?0.45:1,flexShrink:0}},
+            h('span',{style:{display:'block',width:14,height:14,borderRadius:'50%',background:status.automatic?'var(--app-bg)':'var(--app-fg)',transform:status.automatic?'translateX(12px)':'translateX(0)',transition:'transform .15s ease'}})),
+          '自动检查'),
+        h('button',{type:'button',className:'xyz-btn',onClick:openRepository,title:'用默认浏览器打开项目仓库',style:{fontSize:11,padding:'2px 0',opacity:.75}},'GitHub 仓库 ↗')),
+      linkError?h('div',{role:'status',style:{fontSize:11}},linkError):null,
+    ),
   );
 }
 
