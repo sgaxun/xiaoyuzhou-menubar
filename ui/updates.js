@@ -7,6 +7,11 @@ const initialStatus = {
   availableVersion: '', notes: '', message: '', downloaded: 0, total: 0, lastChecked: '',
 };
 const errorText = error => error?.message || String(error);
+const formatDownloadSize = (value, reference=value) => {
+  const unit=reference>=1_000_000?1_000_000:1_000;
+  return `${(value/unit).toFixed(1)} ${unit===1_000_000?'MB':'KB'}`;
+};
+
 
 async function call(action, body) {
   const result = await window.mygo.call('Backend.Request', action, body);
@@ -116,12 +121,21 @@ export function UpdateSettings({updates, player}) {
     status.phase === 'disabled' && h('div', {className: 'xyz-setting-desc'}, status.message || '此版本不支持在线更新'),
     status.availableVersion && h('div', null, `新版本 ${status.availableVersion}`),
     status.notes && h('div', {className: 'xyz-setting-desc', style: {whiteSpace: 'pre-wrap', overflowWrap: 'anywhere'}}, status.notes),
-    status.phase === 'downloading' && h('div', {'aria-live': 'polite'},
-      h('div', null, percent === null ? `正在下载：${downloaded} 字节` : `正在下载：${percent}%（${downloaded} / ${total} 字节）`),
-      h('progress', {max: total || undefined, value: total ? Math.min(downloaded, total) : undefined, 'aria-label': '更新下载进度'})),
+    status.phase === 'downloading' && h('div', {style:{display:'flex',flexDirection:'column',gap:8,padding:'12px 0'}},
+      h('div',{style:{display:'flex',justifyContent:'space-between',fontSize:12}},
+        h('span',null,'正在下载更新'),
+        h('span',{style:{fontVariantNumeric:'tabular-nums',fontWeight:600}},percent===null?'下载中…':`${percent}%`)),
+      h('div',{role:'progressbar','aria-label':'更新下载进度','aria-valuemin':0,'aria-valuemax':100,'aria-valuenow':percent===null?undefined:percent,
+        'aria-valuetext':total?`${formatDownloadSize(Math.min(downloaded,total),total)} / ${formatDownloadSize(total)}`:formatDownloadSize(downloaded),
+        style:{height:5,width:'100%',borderRadius:3,overflow:'hidden',background:'var(--app-track)'}},
+        h('div',{style:{height:'100%',width:percent===null?'30%':`${percent}%`,borderRadius:'inherit',background:'var(--app-fg)',transition:'width .25s ease',animation:percent===null?'xyz-update-indeterminate 1.2s ease-in-out infinite':undefined}})),
+      h('div',{style:{display:'flex',justifyContent:'space-between',fontSize:11,opacity:.65,fontVariantNumeric:'tabular-nums'}},
+        h('span',null,total?`${formatDownloadSize(Math.min(downloaded,total),total)} / ${formatDownloadSize(total)}`:formatDownloadSize(downloaded)),
+        h('span',null,'下载后自动校验')),
+      percent===null?h('style',null,'@keyframes xyz-update-indeterminate{0%{transform:translateX(-100%)}100%{transform:translateX(430%)}}'):null),
     status.phase === 'available' && button('下载更新', updates.download),
     status.phase === 'ready' && button('保存进度并重启安装', () => updates.restart(player)),
-    !failure && status.message && status.phase !== 'disabled' && h('div', {className: 'xyz-setting-desc'}, status.message),
+    !failure && status.message && status.phase !== 'disabled' && status.phase !== 'downloading' && h('div', {className: 'xyz-setting-desc'}, status.message),
     failure && h('div', {role: 'status'},
       h('div', null, failure), button('重试', error ? updates.refresh : status.availableVersion ? updates.download : updates.check, busy)),
   );
