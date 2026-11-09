@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	_ "embed"
 	"fmt"
 	"log"
@@ -81,11 +82,11 @@ func (b *Backend) toggle() {
 
 func (b *Backend) ready() {
 	var err error
-	b.tray, err = mygo.NewTray(mygo.TrayOptions{ID: "xiaoyuzhou-player", Icon: trayIcon(), IconIsTemplate: true, ToolTip: "小宇宙 — 点击打开播放器"})
+	b.tray, err = mygo.NewTray(mygo.TrayOptions{ID: "xiaoyuzhou-player", Icon: trayIcon(), IconIsTemplate: true, ToolTip: "小宇宙播放器 — 点击打开播放器"})
 	if err != nil {
 		log.Fatal(err)
 	}
-	b.win = mygo.NewWindow(mygo.WindowOptions{Title: "小宇宙菜单栏", Width: 460, Height: 620, Hidden: true, Frameless: true, DisableResize: true, DisableMinimize: true, DisableMaximize: true, DisableFullScreen: true, AlwaysOnTop: true, SkipTaskbar: true, Page: mygo.PageOptions{Autoplay: mygo.AutoplayAllow, BackgroundThrottling: mygo.ThrottlingOff}})
+	b.win = mygo.NewWindow(mygo.WindowOptions{Title: "小宇宙播放器", Width: 460, Height: 620, Hidden: true, Frameless: true, DisableResize: true, DisableMinimize: true, DisableMaximize: true, DisableFullScreen: true, AlwaysOnTop: true, SkipTaskbar: true, Page: mygo.PageOptions{Autoplay: mygo.AutoplayAllow, BackgroundThrottling: mygo.ThrottlingOff}})
 	b.win.OnBlur(func() {
 		b.win.Hide()
 	})
@@ -108,7 +109,7 @@ func (b *Backend) ready() {
 		{Label: "打开播放器", Click: func(*mygo.MenuItem, *mygo.Window) { b.show() }},
 		{Label: "播放 / 暂停", Click: func(*mygo.MenuItem, *mygo.Window) { go b.win.Page().Eval("window.menuPlayer?.play()") }},
 		{Label: "下一集", Click: func(*mygo.MenuItem, *mygo.Window) { go b.win.Page().Eval("window.menuPlayer?.next()") }},
-		mygo.Separator(), {Label: "退出小宇宙", Role: mygo.RoleQuit},
+		mygo.Separator(), {Label: "退出小宇宙播放器", Role: mygo.RoleQuit},
 	})
 	b.tray.OnRightClick(func() { b.win.Hide(); b.tray.SetMenu(menu); defer b.tray.SetMenu(nil); b.tray.PopUpMenu() })
 	mygo.NowPlaying.OnCommand(func(cmd mygo.MediaCommand, pos time.Duration) {
@@ -147,19 +148,21 @@ func main() {
 	if err != nil {
 		log.Fatal("初始化播放器服务失败：", err)
 	}
+	episodeCtx, cancelEpisodes := context.WithCancel(context.Background())
+	defer cancelEpisodes()
 	b := &Backend{service: service, updates: appupdate.New(currentVersion(), updateDriver{}, filepath.Join(dir, "updates.json"))}
 	mygo.Bind(b)
-	mygo.App.SetName("小宇宙菜单栏")
+	mygo.App.SetName("小宇宙播放器")
 	mygo.Theme.SetSource(mygo.ThemeSystem)
 	mygo.App.SetActivationPolicy(mygo.ActivationPolicyAccessory)
 	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) { b.quitting = true })
-	mygo.App.OnWillQuit(func(*mygo.QuitEvent) { b.updates.Close(); mygo.NowPlaying.Clear(); b.tray.Destroy() })
+	mygo.App.OnWillQuit(func(*mygo.QuitEvent) { cancelEpisodes(); b.updates.Close(); mygo.NowPlaying.Clear(); b.tray.Destroy() })
 	mygo.App.OnActivate(func(visible bool) {
 		if !visible && b.win != nil {
 			b.show()
 		}
 	})
-	mygo.App.WhenReady(func() { b.ready(); b.updates.Start() })
+	mygo.App.WhenReady(func() { b.ready(); b.updates.Start(); go service.RunEpisodeUpdateScheduler(episodeCtx) })
 	if err = mygo.App.Run(); err != nil {
 		log.Fatal(err)
 	}

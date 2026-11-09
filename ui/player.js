@@ -1,4 +1,5 @@
 import React from 'react';
+import {EpisodeUpdates, EpisodeUpdateSettings} from './episode-updates.js';
 import {useUpdates,UpdateSettings,UpdateBanner} from './updates.js';
 import DOMPurify from 'dompurify';
 import QRCode from 'qrcode';
@@ -70,7 +71,9 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
     /** "3 分钟前" 这样的相对时间，用于展示缓存年龄。 */
     const relTime = (ts) => {
       if (!ts) return '';
-      const diff = Date.now() - ts;
+      const time = typeof ts === 'number' ? ts : Date.parse(ts);
+      if (!Number.isFinite(time)) return '时间未知';
+      const diff = Math.max(0, Date.now() - time);
       if (diff < 60000) return '刚刚更新';
       const min = Math.floor(diff / 60000);
       if (min < 60) return `${min} 分钟前更新`;
@@ -151,6 +154,7 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
       display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;word-break:break-word;
       max-height:2.6em}
     .xyz-card-sub{font-size:11px;line-height:1.3;opacity:.6;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .xyz-card-duration{align-self:flex-end;flex:0 0 auto;font-size:11px;line-height:1.3;opacity:.55;font-variant-numeric:tabular-nums;white-space:nowrap}
     .xyz-card-sub.err{color:var(--dsw-alias-state-error-primary,#e5484d);opacity:1;white-space:normal;
       display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
     .xyz-seek{position:relative;height:3px;border-radius:2px;cursor:pointer;
@@ -723,6 +727,7 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
               error ? error : current ? current.podcastTitle || '正在播放' : '点开选择节目',
             ),
           ),
+          current ? h('span', {className:'xyz-card-duration', 'aria-label':`总时长 ${total > 0 ? mmss(total) : '未知'}`, title:'总时长'}, total > 0 ? mmss(total) : '--:--') : null,
         ),
 
         // 进度条
@@ -779,11 +784,12 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
      * 搜索结果、榜单、精选、历史都用它，避免同一套结构写六遍。
      */
     function EpisodeRow(props) {
-      const { ep, player, rank, subtitle, onPlay } = props;
+      const { ep, player, rank, subtitle, onPlay, onAdd, addDisabled } = props;
       const showNotes=React.useContext(NotesContext);
       const inQ = player.queue.some((q) => q.eid === ep.eid);
       const toggle = (e) => {
         e.stopPropagation();
+        if (onAdd) { onAdd(); return; }
         if (inQ) {
           player.setQueue(player.queue.filter((q) => q.eid !== ep.eid));
           return;
@@ -819,6 +825,7 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
           {
             className: inQ ? 'xyz-row-action added' : 'xyz-row-action',
             title: inQ ? '已在播放列表' : '加入播放列表',
+            disabled: !!addDisabled || (!!onAdd && inQ),
             onClick: toggle,
           },
           h(
@@ -880,6 +887,7 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
       const [cookie, setCookie] = useState('');
       const [qrVisible,setQrVisible]=useState(false);
       const [subs, setSubs] = useState([]);
+      const [showSubscriptions, setShowSubscriptions] = useState(false);
       const [detail, setDetail] = useState(null);
       const [cacheAt, setCacheAt] = useState(0);
       const [subQuery, setSubQuery] = useState('');
@@ -1022,7 +1030,7 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
         setLoading(true);
         setMessage('');
         try {
-          const data = await call('subscriptions');
+          const data = await call('subscriptions?refresh=1');
           setSubs(data.list || []);
           setCacheAt(Date.now());
           if (data.user) setState((s) => ({ ...s, user: data.user }));
@@ -1061,6 +1069,7 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
           setLoggedIn(true);
           setState((s) => ({ ...s, user: data.user }));
           setCookie('');
+          setSubs([]);setCacheAt(0);setShowSubscriptions(true);
           setMessage(
             data.user?.nickname
               ? `已登录：${data.user.nickname}。点「刷新订阅」拉取列表。`
@@ -1149,7 +1158,7 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
         h(
           'div',
           {
-            className: 'xyz-panel-body',
+            className: tab === 'subs' && !showSubscriptions ? 'xyz-panel-body xyz-feed-body' : 'xyz-panel-body',
             onScroll: (e) => {
               // 精选明细：滚动到底部附近自动加载更早的一天（无感加载）
               if (discoverDetail?.kind !== 'picks' || !pickCursor || pickLoading) return;
@@ -1201,11 +1210,15 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
               )
             : null,
 
-          tab === 'subs'
+          tab === 'subs' && !showSubscriptions
+            ? h(EpisodeUpdates, {player, call, EpisodeRow, subscriptionCount:subs.length, onSubscriptions:()=>setShowSubscriptions(true), relTime}) : null,
+
+          tab === 'subs' && showSubscriptions
             ? loggedIn
               ? h(
                   'div',
                   { style: { display: 'flex', flexDirection: 'column', gap: 8 } },
+                  h('button', {className:'xyz-btn', style:{alignSelf:'flex-start'}, onClick:()=>setShowSubscriptions(false)}, '‹ 订阅动态'),
                   h(
                     'div',
                     { className: 'xyz-toolbar' },
@@ -1223,7 +1236,7 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
                         onClick: () => loadSubs(),
                         disabled: loading,
                       },
-                      loading ? '拉取中…' : subs.length ? '刷新' : '拉取订阅',
+                      loading ? '拉取中…' : subs.length ? '刷新订阅' : '拉取订阅',
                     ),
                   ),
                   subs.length
@@ -1800,10 +1813,10 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
                     state?.user?.avatar?h('img',{className:'xyz-avatar',src:imageOf(state.user.avatar),alt:''}):h('div',{className:'xyz-avatar empty'},IconMic(16)),
                     h('div',{className:'xyz-account-main'},h('div',{className:'xyz-account-name'},state?.user?.nickname||'已登录'),h('div',{className:'xyz-account-sub'},'播放进度和播放列表保存在本机')),
                     h('button',{className:'xyz-btn',onClick:doLogout},'退出')):
-                    h('div',{className:'xyz-hint'},'使用手机小宇宙 App 扫码，确认后自动登录并读取订阅。'),
+                    h('div',{className:'xyz-hint'},'使用手机小宇宙 App 扫码登录，订阅列表需手动拉取。'),
                   qrVisible ? h(QrLogin,{
                     onCancel:()=>setQrVisible(false),
-                    onSuccess:async()=>{await refreshState();setQrVisible(false);setMessage('登录成功');await loadSubs();setTab('subs')}
+                    onSuccess:async()=>{await refreshState();setQrVisible(false);setSubs([]);setCacheAt(0);setShowSubscriptions(true);setMessage('登录成功，点「拉取订阅」同步列表');setTab('subs')}
                   }):h('button',{className:loggedIn?'xyz-btn':'xyz-btn primary',style:{alignSelf:'flex-start'},onClick:()=>{setMessage('');setQrVisible(true)}},loggedIn?'扫码切换账号':'扫码登录'),
                   !loggedIn?h('details',{className:'xyz-login-advanced'},h('summary',null,'高级设置：手动导入登录态'),
                     h('textarea',{className:'xyz-input',rows:3,placeholder:'粘贴 cookie 或 x-jike-access-token',value:cookie,onChange:e=>setCookie(e.target.value)}),
@@ -1883,6 +1896,7 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
                     '播放列表和倍速设置保存在本机，不会因为刷新或更新程序而丢失。',
                   ),
                 ),
+                h(EpisodeUpdateSettings,{call}),
                 h(UpdateSettings,{updates,player}),
               )
             : null,
@@ -2048,6 +2062,25 @@ const hostStyle=document.createElement('style');hostStyle.textContent=`
 :root{color-scheme:light dark;--app-bg:#f8f8fa;--app-fg:#24252b;--app-selected:#e2e4e9;--app-hover:#eceef1;--app-border:#d7d9df;--app-track:#d4d7dd;--app-link:#9a5300;--app-focus:#777b85;--app-scroll:#b7bac2;--app-play:#292b32;--app-play-ink:#fff;--dsw-alias-bg-overlay:var(--app-bg);--dsw-alias-label-primary:var(--app-fg);--dsw-alias-brand-primary:var(--app-fg);--dsw-alias-bg-base:var(--app-bg);--dsw-alias-border-l1:var(--app-border);--dsw-alias-border-l2:var(--app-border)}
 @media(prefers-color-scheme:dark){:root{--app-bg:#25262b;--app-fg:#eeeff2;--app-selected:#3b3d45;--app-hover:#303239;--app-border:#3d3f47;--app-track:#50535d;--app-link:#ffbd77;--app-focus:#a9afbd;--app-scroll:#646976;--app-play:#f1f2f5;--app-play-ink:#24262c}}
 
+.xyz-panel-body.xyz-feed-body{display:flex;flex-direction:column;overflow:hidden}
+.xyz-episode-updates{display:flex;flex-direction:column;gap:12px;flex:1;min-height:0}
+.xyz-episode-updates>*{flex-shrink:0}
+.xyz-episode-updates>.xyz-list{flex:1;min-height:0;overflow-y:auto}
+.xyz-feed-heading{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:4px 0 2px}
+.xyz-feed-title{font-size:14px;font-weight:600;margin-bottom:5px}
+.xyz-subscriptions-entry{font-size:11px;white-space:nowrap;opacity:.65}
+.xyz-feed-item{position:relative;padding-bottom:16px;border-bottom:1px solid var(--app-border)}
+.xyz-feed-ignore{position:absolute;right:6px;bottom:2px;font-size:10px;opacity:.45}
+.xyz-feed-footnote{margin-top:auto;padding-top:8px;font-size:10px;line-height:1.6;text-align:right;opacity:.4}
+.xyz-tabs{min-width:0;overflow-x:auto}.xyz-tab{flex-shrink:0}
+.xyz-update-banner{display:flex;align-items:center;gap:8px;margin:10px 12px 2px;padding:8px 9px 8px 12px;border:1px solid var(--app-border);border-radius:11px;background:var(--app-hover);flex-shrink:0;min-height:42px}
+.xyz-update-spark{color:var(--app-link);font-size:18px;line-height:1;flex-shrink:0}
+.xyz-update-label{flex:1;min-width:0;font-size:12px;font-weight:500;line-height:1.5;overflow-wrap:anywhere}
+.xyz-update-banner .xyz-update-action{flex-shrink:0;padding:4px 11px;background:var(--app-play);color:var(--app-play-ink);border-radius:7px;font-size:11px;font-weight:600;line-height:18px}
+.xyz-update-banner .xyz-update-action:hover{background:var(--app-play);filter:brightness(.9)}
+.xyz-update-banner .xyz-update-dismiss{flex-shrink:0;width:24px;height:26px;padding:0;font-size:18px;line-height:26px;opacity:.5}
+.xyz-update-banner .xyz-update-dismiss:hover{opacity:1}
+.xyz-update-banner button:focus-visible{outline:2px solid var(--app-focus);outline-offset:2px}
 *{box-sizing:border-box}body{margin:0;padding:0;background:var(--app-bg);color:var(--app-fg);font-family:system-ui,-apple-system,sans-serif}#root{height:100vh;display:flex;flex-direction:column;gap:0}
 .xyz-card-wrap{padding:0;flex-shrink:0;order:1}.xyz-panel{position:relative!important;inset:auto!important;width:100%!important;max-width:none!important;height:auto!important;max-height:none!important;min-height:0!important;flex:1;order:2;box-shadow:none}.xyz-resize{display:none!important}
 .xyz-panel{border:none;border-radius:0;background:var(--app-bg)}.xyz-panel-head{padding:10px 16px}.xyz-panel-body{padding-left:16px;padding-right:16px}.xyz-row-active,.xyz-tab[data-active="true"]{background:var(--app-selected)}.xyz-row-active .xyz-row-t{color:var(--app-fg)}.xyz-row:not(.xyz-row-active):hover{background:var(--app-hover)}

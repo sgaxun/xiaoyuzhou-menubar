@@ -1,6 +1,6 @@
 {
   "name": "xiaoyuzhou-menubar",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "private": true,
   "type": "module",
   "scripts": {
@@ -19,7 +19,7 @@
     "dompurify": "^3.4.17",
     "qrcode": "^1.5.4"
   },
-  "description": "macOS 小宇宙菜单栏播放器，基于 MyGo，支持扫码登录、订阅、shownotes 和本地续播",
+  "description": "小宇宙播放器，支持 macOS 菜单栏播放，基于 MyGo，支持扫码登录、订阅、shownotes 和本地续播",
   "engines": {
     "node": ">=20"
   }

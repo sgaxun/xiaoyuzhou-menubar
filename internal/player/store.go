@@ -115,6 +115,9 @@ func (s *Service) saveState(next object) error {
 }
 func (s *Service) saveCache() error { return writeJSON(filepath.Join(s.dir, "cache.json"), s.cache) }
 func (s *Service) clearAccountCache() error {
+	if err := s.resetEpisodeUpdates(); err != nil {
+		return err
+	}
 	delete(s.cache, "subs")
 	delete(s.cache, "discover")
 	for k := range s.cache {

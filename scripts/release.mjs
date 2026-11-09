@@ -76,7 +76,7 @@ async function main() {
   // retaining the Chinese local DMG name; the temporary copy is always removed.
   const staging = await mkdtemp(join(tmpdir(), 'xiaoyuzhou-release-'));
   try {
-    const installer = join(staging, `xiaoyuzhou-menubar-${version}-AppleSilicon.dmg`);
+    const installer = join(staging, `xiaoyuzhou-player-${version}-AppleSilicon.dmg`);
     await copyFile(assets[0], installer);
     assets[0] = installer;
     run('gh', ['release', 'upload', tag, ...assets, '--repo', repo, '--clobber'], ghEnv, true);

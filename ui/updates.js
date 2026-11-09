@@ -156,9 +156,13 @@ export function UpdateSettings({updates, player}) {
 
 export function UpdateBanner({updates, onOpen}) {
   const {status} = updates;
-  if (status.phase !== 'available' && status.phase !== 'ready') return null;
-  return h('div', {className: 'xyz-setting-row'},
-    h('span', {className: 'xyz-setting-desc'}, status.phase === 'ready'
-      ? `更新 ${status.availableVersion || ''} 已下载` : `有新版本 ${status.availableVersion || ''}`),
-    h('button', {type: 'button', className: 'xyz-btn', onClick: onOpen}, '查看更新'));
+  const [dismissed, setDismissed] = useState('');
+  const noticeKey = `${status.availableVersion}:${status.phase}`;
+  if ((status.phase !== 'available' && status.phase !== 'ready') || dismissed === noticeKey) return null;
+  return h('aside', {className: 'xyz-update-banner', 'aria-label': '版本更新'},
+    h('span', {className: 'xyz-update-spark', 'aria-hidden': true}, '✦'),
+    h('span', {className: 'xyz-update-label'}, status.phase === 'ready'
+      ? `版本 ${status.availableVersion || ''} 已就绪` : `发现新版本 ${status.availableVersion || ''}`),
+    h('button', {type: 'button', className: 'xyz-btn xyz-update-action', onClick: onOpen}, status.phase === 'ready' ? '查看安装' : '更新'),
+    h('button', {type: 'button', className: 'xyz-btn xyz-update-dismiss', 'aria-label': '暂时关闭更新提醒', title: '暂时关闭', onClick: () => setDismissed(noticeKey)}, '×'));
 }

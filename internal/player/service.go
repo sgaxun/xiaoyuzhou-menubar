@@ -18,12 +18,17 @@ import (
 )
 
 type Service struct {
-	mu     sync.Mutex
-	dir    string
-	state  object
-	cache  object
-	client *podcast.Client
-	qr     *qrauth.Auth
+	mu               sync.Mutex
+	updateMu         sync.Mutex
+	updateEpoch      uint64
+	updateLast       time.Time
+	updateChecking   bool
+	updateAutoCancel context.CancelFunc
+	dir              string
+	state            object
+	cache            object
+	client           *podcast.Client
+	qr               *qrauth.Auth
 }
 
 func New(dir string) (*Service, error) { return NewWithClient(dir, podcast.NewClient()) }
@@ -148,6 +153,8 @@ func (s *Service) Request(action string, body any) (any, error) {
 	}
 	var result any
 	switch u.Path[1:] {
+	case "checkEpisodeUpdates":
+		result, err = s.checkEpisodeUpdates(ctx)
 	case "qrStart":
 		result, err = s.qr.Start()
 	case "qrStatus":
@@ -172,6 +179,41 @@ func (s *Service) dispatch(ctx context.Context, action string, q url.Values, bod
 	force := q.Get("refresh") == "1"
 	ok := object{"ok": true}
 	switch action {
+	case "setEpisodeUpdateAutomatic":
+		enabled, valid := body["enabled"].(bool)
+		if !valid {
+			return nil, errors.New("缺少自动检查开关")
+		}
+		next := clone(s.state)
+		next["episodeUpdatesAutomatic"] = enabled
+		if err := s.saveState(next); err != nil {
+			return nil, err
+		}
+		if !enabled && s.updateAutoCancel != nil {
+			s.updateAutoCancel()
+		}
+		return s.episodeUpdateFeed(), nil
+	case "episodeUpdates":
+		return s.episodeUpdateFeed(), nil
+	case "dismissEpisodeUpdates":
+		next := clone(s.state)
+		feed := obj(next["episodeUpdates"])
+		ids := map[string]bool{}
+		for _, id := range list(body["eids"]) {
+			ids[str(id)] = true
+		}
+		pending := []any{}
+		for _, ep := range list(feed["episodes"]) {
+			if !ids[str(obj(ep)["eid"])] {
+				pending = append(pending, ep)
+			}
+		}
+		feed["episodes"] = pending
+		next["episodeUpdates"] = feed
+		if err := s.saveState(next); err != nil {
+			return nil, err
+		}
+		return s.episodeUpdateFeed(), nil
 	case "state":
 		access, _, err := s.tokens()
 		if err != nil {
@@ -182,6 +224,21 @@ func (s *Service) dispatch(ctx context.Context, action string, q url.Values, bod
 		next := clone(s.state)
 		next["queue"] = list(body["queue"])
 		next["queueIndex"] = num(body["index"])
+		queuedIDs := map[string]bool{}
+		for _, v := range list(next["queue"]) {
+			queuedIDs[str(obj(v)["eid"])] = true
+		}
+		if feed, exists := next["episodeUpdates"]; exists {
+			f := obj(feed)
+			pending := []any{}
+			for _, v := range list(f["episodes"]) {
+				if !queuedIDs[str(obj(v)["eid"])] {
+					pending = append(pending, v)
+				}
+			}
+			f["episodes"] = pending
+			next["episodeUpdates"] = f
+		}
 		return ok, s.saveState(next)
 	case "savePrefs":
 		next := clone(s.state)
@@ -238,6 +295,9 @@ func (s *Service) dispatch(ctx context.Context, action string, q url.Values, bod
 		}
 		return object{"ok": true, "user": user, "hasRefresh": tokens.RefreshToken != ""}, nil
 	case "clearCache":
+		if err := s.resetEpisodeUpdates(); err != nil {
+			return nil, err
+		}
 		s.cache = object{}
 		return ok, s.saveCache()
 	case "dropCache":
