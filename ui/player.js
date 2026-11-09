@@ -1,4 +1,6 @@
 import React from 'react';
+import {PodcastDetails} from './podcast-details.js';
+import {CoverPreview, openCover} from './cover-preview.js';
 import {queueEpisode,episodeImage,episodePodcast} from './episode.js';
 import {SeekBar} from './seek-bar.js';
 import {FullTitle} from './full-title.js';
@@ -18,7 +20,14 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape'||(e.metaKey&&e.key==
 const NotesContext=React.createContext(()=>{});
 const playerRef = {current:null}; const listeners=new Set(); const mountedRef={current:false}; const mountedListeners=new Set();
 
-    const h = (tag, props, ...children) => React.createElement(tag, tag === 'button' && props?.title ? {...props, 'aria-label': props['aria-label'] || props.title} : props, ...children);
+    const h = (tag, props, ...children) => {
+      if (tag === 'img' && props?.alt !== '小宇宙登录二维码' && !props?.className?.includes('xyz-avatar')) {
+        props = {...props, role: 'button', tabIndex: 0, 'aria-label': '放大封面',
+          style: {...props.style, cursor: 'zoom-in'}, onClick: openCover,
+          onKeyDown: event => {if (event.key === 'Enter' || event.key === ' ') openCover(event);}};
+      }
+      return React.createElement(tag, tag === 'button' && props?.title ? {...props, 'aria-label': props['aria-label'] || props.title} : props, ...children);
+    };
     const { useState, useEffect, useRef, useCallback, useMemo } = React;
 
     const API = '/xiaoyuzhou/api';
@@ -1266,43 +1275,7 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
           message ? h('div', { className: tab === 'settings' ? 'xyz-hint' : 'xyz-err', style: { marginBottom: 8 } }, message) : null,
 
           tab === 'detail' && detail
-            ? h(
-                'div',
-                { style: { display: 'flex', flexDirection: 'column', gap: 6 } },
-                detail.podcast
-                  ? h(
-                      'div',
-                      { style: { display: 'flex', gap: 10, alignItems: 'center', marginBottom: 6, cursor: 'pointer' } },
-                      h(
-                        'button',
-                        { className: 'xyz-btn', onClick: () => setTab('subs') },
-                        '‹ 返回',
-                      ),
-                      h('img', { src: imageOf(detail.podcast.image), alt: '', style: { width: 44, height: 44, borderRadius: 8 } }),
-                      h(
-                        'div',
-                        { className: 'xyz-row-main' },
-                        h('div', { className: 'xyz-row-t' }, detail.podcast.title),
-                        h('div', { className: 'xyz-row-s' }, `${detail.podcast.author} · ${detail.episodes.length} 集${detail.podcast.episodeCount > detail.episodes.length ? ` / 共 ${detail.podcast.episodeCount} 集` : ''}`),
-                      ),
-                    )
-                  : h('button', { className: 'xyz-btn', onClick: () => setTab('subs') }, '‹ 返回'),
-                detail.episodes.length
-                  ? h(
-                      'div',
-                      { style: { display: 'flex', gap: 8, marginBottom: 2 } },
-                      h('span', { className: 'xyz-hint' }, '点单集查看介绍；点 ▶ 播放，点 + 加入播放列表'),
-                    )
-                  : null,
-                h(
-                  'div',
-                  { className: 'xyz-list' },
-                  ...detail.episodes.map((ep, i) => {
-                    return h(EpisodeRow, { key: `row-${ep.eid}`, ep: ep, player, });
-                  }),
-                  detail.episodes.length === 0 ? h('div', { className: 'xyz-empty' }, '这个节目暂时没有可播放的单集') : null,
-                ),
-              )
+            ? h(PodcastDetails, {detail, player, EpisodeRow, onBack: () => setTab('subs')})
             : null,
 
           tab === 'subs' && !showSubscriptions
@@ -2221,4 +2194,8 @@ const hostStyle=document.createElement('style');hostStyle.textContent=`
 .xyz-qr-login{display:flex;flex-direction:column;align-items:center;gap:12px;padding:14px 0}.xyz-qr-code{width:248px;height:248px;padding:12px;display:grid;place-items:center;background:white;color:#24252b;border-radius:12px}.xyz-qr-code img{display:block;width:224px;height:224px}.xyz-qr-status{text-align:center;font-size:12px;line-height:1.6}.xyz-qr-actions{display:flex;gap:14px;align-items:center}.xyz-login-advanced{font-size:11px;opacity:.7;margin-top:8px}.xyz-login-advanced summary{cursor:pointer;margin-bottom:8px}.xyz-login-advanced textarea{margin-bottom:8px}
 ::-webkit-scrollbar{width:5px}::-webkit-scrollbar-thumb{background:var(--app-scroll);border-radius:4px}
 `;document.head.append(hostStyle);
-createRoot(document.getElementById('root')).render(React.createElement(PlayerDock,{wide:true}));
+createRoot(document.getElementById('root')).render(React.createElement(React.Fragment,null,React.createElement(PlayerDock,{wide:true}),React.createElement(CoverPreview)));
+
+const podcastStyle = document.createElement('style');
+podcastStyle.textContent = `.xyz-podcast-details{display:flex;flex-direction:column;gap:16px;min-height:0}.xyz-podcast-heading{display:flex;gap:16px;align-items:center}.xyz-podcast-heading h2{font-size:18px;line-height:1.4;margin:0 0 6px;overflow-wrap:anywhere}.xyz-podcast-cover{padding:0;border:0;background:transparent;flex-shrink:0;cursor:zoom-in;border-radius:12px}.xyz-podcast-cover img{display:block;width:88px;height:88px;object-fit:cover;border-radius:12px}.xyz-podcast-cover:focus-visible{outline:2px solid var(--app-focus);outline-offset:4px}.xyz-podcast-brief{font-size:12px;line-height:1.6;margin-top:6px;opacity:.8}.xyz-podcast-tabs{display:flex;gap:20px;border-bottom:1px solid var(--app-border)}.xyz-podcast-tabs button{padding:8px 0 10px;background:none;border:0;border-bottom:2px solid transparent;color:var(--app-fg);opacity:.6;cursor:pointer;font:inherit;font-size:13px}.xyz-podcast-tabs button[aria-selected=true]{border-bottom-color:var(--app-share);color:var(--app-share);opacity:1;font-weight:600}.xyz-podcast-description{white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px;line-height:1.85;padding:0 0 20px}.xyz-podcast-description p{margin:0 0 12px}.xyz-podcast-description a{color:var(--app-link)}`;
+document.head.append(podcastStyle);

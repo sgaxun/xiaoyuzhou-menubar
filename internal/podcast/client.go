@@ -193,7 +193,7 @@ func normalizePodcast(raw Map) Map {
 		return nil
 	}
 	im := obj(raw["image"])
-	return Map{"pid": raw["pid"], "title": fallback(raw["title"], "未命名节目"), "author": fallback(raw["author"], ""), "brief": fallback(raw["brief"], ""), "image": fallback(im["picUrl"], fallback(im["middlePicUrl"], "")), "episodeCount": number(raw["episodeCount"]), "latestEpisodePubDate": fallback(raw["latestEpisodePubDate"], ""), "subscriptionStatus": fallback(raw["subscriptionStatus"], "OFF")}
+	return Map{"pid": raw["pid"], "title": fallback(raw["title"], "未命名节目"), "author": fallback(raw["author"], ""), "brief": fallback(raw["brief"], ""), "description": fallback(raw["description"], ""), "image": fallback(im["picUrl"], fallback(im["middlePicUrl"], "")), "episodeCount": number(raw["episodeCount"]), "latestEpisodePubDate": fallback(raw["latestEpisodePubDate"], ""), "subscriptionStatus": fallback(raw["subscriptionStatus"], "OFF")}
 }
 func extractNextData(r io.Reader) (Map, error) {
 	z := html.NewTokenizer(r)

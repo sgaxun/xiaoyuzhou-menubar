@@ -86,7 +86,7 @@ func TestPageMethods(t *testing.T) {
 		if r.Header.Get("x-jike-access-token") != "" || r.Header.Get("Cookie") != "" {
 			t.Error("public page credentials")
 		}
-		p := Map{"episode": rawEpisode(), "podcast": Map{"pid": testID, "episodeCount": "3", "episodes": []any{rawEpisode(), Map{}}}}
+		p := Map{"episode": rawEpisode(), "podcast": Map{"pid": testID, "episodeCount": "3", "description": "第一段\n\n第二段", "episodes": []any{rawEpisode(), Map{}}}}
 		b, _ := json.Marshal(Map{"props": Map{"pageProps": p}})
 		fmt.Fprintf(w, `<script id="__NEXT_DATA__" type="application/json">%s</script>`, b)
 	})
@@ -102,7 +102,7 @@ func TestPageMethods(t *testing.T) {
 		t.Fatal(notes, e)
 	}
 	pc, e := c.GetPodcast(context.Background(), testID)
-	if e != nil || len(pc["episodes"].([]Map)) != 1 {
+	if e != nil || len(pc["episodes"].([]Map)) != 1 || obj(pc["podcast"])["description"] != "第一段\n\n第二段" {
 		t.Fatal(pc, e)
 	}
 	if _, e = c.GetEpisode(context.Background(), "bad"); e == nil {

@@ -440,7 +440,14 @@ func (s *Service) dispatch(ctx context.Context, action string, q url.Values, bod
 		if kind != "episode" && kind != "podcast" {
 			return nil, errors.New("只支持节目链接、单集链接或分享短链")
 		}
-		v, err := s.cached(kind+":"+id, kind, flag(body["refresh"]), func() (any, error) {
+		refresh := flag(body["refresh"])
+		if kind == "podcast" {
+			cachedPodcast := obj(obj(obj(s.cache[kind+":"+id])["value"])["podcast"])
+			if _, hasDescription := cachedPodcast["description"]; !hasDescription {
+				refresh = true
+			}
+		}
+		v, err := s.cached(kind+":"+id, kind, refresh, func() (any, error) {
 			if kind == "episode" {
 				return s.client.GetEpisode(ctx, id)
 			}
@@ -449,7 +456,7 @@ func (s *Service) dispatch(ctx context.Context, action string, q url.Values, bod
 		if err != nil {
 			return nil, err
 		}
-		out := object{"ok": true, "kind": kind, "cached": !flag(body["refresh"])}
+		out := object{"ok": true, "kind": kind, "cached": !refresh}
 		if kind == "episode" {
 			out["episode"] = v
 		} else {
