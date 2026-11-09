@@ -38,6 +38,38 @@ func (s *Service) episodeUpdateFeed() object {
 	return object{"ok": true, "episodes": episodes, "checkedAt": str(f["checkedAt"]), "failures": list(f["failures"]), "remaining": s.updateRemaining(f), "automatic": s.episodeUpdatesAutomatic(), "checking": s.updateChecking}
 }
 
+// Restore source metadata for old queue entries using only local evidence.
+// An explicit source wins; otherwise require a unique subscribed seen record.
+func (s *Service) queueSubscriptionSource(ep object) object {
+	subs := map[string]object{}
+	for _, v := range list(obj(s.cache["subs"])["value"]) {
+		sub := obj(v)
+		subs[str(sub["pid"])] = sub
+	}
+	if pid := str(ep["subscriptionPid"]); pid != "" {
+		if sub, ok := subs[pid]; ok {
+			return subscriptionEpisode(ep, sub)
+		}
+		return ep
+	}
+	var source object
+	for pid, v := range obj(obj(s.state["episodeUpdates"])["programs"]) {
+		if sub, ok := subs[pid]; ok && flag(obj(obj(v)["seen"])[str(ep["eid"])]) {
+			if source != nil {
+				return ep
+			} // Ambiguous: do not guess.
+			source = sub
+		}
+	}
+	if source != nil {
+		return subscriptionEpisode(ep, source)
+	}
+	if sub, ok := subs[str(ep["pid"])]; ok {
+		return subscriptionEpisode(ep, sub)
+	}
+	return ep
+}
+
 // Keep canonical episode metadata for playback; source fields describe why the
 // episode appears in this user's subscription feed. Also decorates older caches.
 func subscriptionEpisode(ep, sub object) object {

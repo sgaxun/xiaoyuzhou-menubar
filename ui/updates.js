@@ -1,4 +1,5 @@
 import React from 'react';
+import {queueEpisode} from './episode.js';
 
 const h = React.createElement;
 const {useState, useRef, useEffect, useCallback} = React;
@@ -68,8 +69,7 @@ export function useUpdates() {
       });
     }
     await call('saveQueue', {
-      queue: player.queue.map(({eid, pid, title, podcastTitle, image, duration}) =>
-        ({eid, pid, title, podcastTitle, image, duration})),
+      queue: player.queue.map(queueEpisode),
       index: player.index,
     });
     await call('savePrefs', {rate: player.rate, volume: player.volume});
@@ -119,7 +119,7 @@ export function UpdateSettings({updates, player}) {
   const divider={borderTop:'1px solid var(--app-border)',paddingTop:10};
   return h('section', {className:'xyz-section','aria-label':'软件更新'},
     h('div', {className:'xyz-section-title'},'软件更新'),
-    h('div',{style:{background:'var(--app-hover)',border:'1px solid var(--app-border)',borderRadius:10,padding:12,display:'flex',flexDirection:'column',gap:12}},
+    h('div',{style:{background:'transparent',border:0,padding:0,display:'flex',flexDirection:'column',gap:12}},
       h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',gap:12}},
         h('div',{style:{display:'flex',flexDirection:'column',gap:4,minWidth:0}},
           h('div',{style:{fontSize:13,fontWeight:600}},`版本 ${status.version||'读取中…'}`),

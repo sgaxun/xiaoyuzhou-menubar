@@ -1,4 +1,5 @@
 import React from 'react';
+import {queueEpisode} from './episode.js';
 const h = React.createElement;
 const {useState, useEffect, useRef} = React;
 
@@ -42,15 +43,17 @@ export function EpisodeUpdates({player, call, EpisodeRow, subscriptionCount, onS
     const data = await call('dismissEpisodeUpdates', {eids});
     if (alive.current) setFeed(data);
   });
-  const add = episodes => run(async () => {
+  const add = (episodes,where='end') => run(async () => {
     // Use the current player snapshot, preserving playback and existing queue order.
     const current = currentPlayer.current;
     const ids = new Set(current.queue.map(ep => ep.eid));
     const fresh = episodes.filter(ep => {if (ids.has(ep.eid)) return false; ids.add(ep.eid); return true});
-    const next = current.queue.concat(fresh);
+    const next = [...current.queue];
+    const currentIndex=next.findIndex(ep=>ep.eid===current.current?.eid);
+    next.splice(where==='next'?currentIndex+1:next.length,0,...fresh);
     current.setQueue(next);
     // Keep a standalone playing episode's index (-1) unchanged.
-    await call('saveQueue', {queue: next.map(({eid,pid,title,podcastTitle,image,duration}) => ({eid,pid,title,podcastTitle,image,duration})), index: current.index});
+    await call('saveQueue', {queue: next.map(queueEpisode), index: current.index});
     const data = await call('dismissEpisodeUpdates', {eids: episodes.map(ep => ep.eid)});
     if (alive.current) {
       setFeed(data);
@@ -62,18 +65,18 @@ export function EpisodeUpdates({player, call, EpisodeRow, subscriptionCount, onS
   const working = busy || !!feed.checking;
   return h('div', {className: 'xyz-episode-updates'},
     h('div', {className: 'xyz-feed-heading'},
-      h('div', null, h('div', {className:'xyz-feed-title'}, '订阅动态'),
-        h('div', {className:'xyz-hint'}, feed.checking ? '正在检查订阅更新…' : feed.checkedAt ? `上次检查 · ${relTime(feed.checkedAt)}` : '看看订阅的节目有什么新内容')),
-      h('button', {type:'button', className:'xyz-btn xyz-subscriptions-entry', onClick:onSubscriptions}, `全部订阅 · ${subscriptionCount} ›`)),
-    h('div', {className:'xyz-toolbar'},
-      h('span', {className:'xyz-hint', style:{flex:1}}, `${episodes.length} 条待处理单集`),
-      h('button', {type:'button', className:'xyz-btn', disabled:working || !subscriptionCount, onClick:check}, working ? '检查中…' : '检查更新'),
-      h('button', {type:'button', className:'xyz-btn primary', disabled:busy || !episodes.length, onClick:()=>add(episodes)}, '全部加入')),
+      h('div', {className:'xyz-feed-title'}, '订阅动态', episodes.length ? h('span',{className:'xyz-feed-count'},episodes.length) : null),
+      h('button', {type:'button', className:'xyz-btn xyz-subscriptions-entry', onClick:onSubscriptions}, `全部订阅 ${subscriptionCount} ›`)),
+    h('div', {className:'xyz-feed-toolbar'},
+      h('span', {className:'xyz-hint xyz-feed-status'}, feed.checking ? '正在检查更新…' : feed.checkedAt ? `${relTime(feed.checkedAt).replace(/更新$/, '')}检查` : '尚未检查更新'),
+      h('div',{className:'xyz-feed-actions'},
+        h('button', {type:'button', className:'xyz-btn xyz-feed-check', disabled:working || !subscriptionCount, onClick:check}, working ? '检查中…' : '检查更新'),
+        episodes.length ? h('button', {type:'button', className:'xyz-btn primary xyz-feed-add', disabled:busy, onClick:()=>add(episodes)}, '全部加入') : null)),
     message ? h('div', {className:'xyz-hint', role:'status'}, message) : null,
     feed.failures?.length ? h('div', {className:'xyz-hint', role:'status'}, `${feed.failures.length} 个节目未能检查，已保留原有记录，下次可重试。`) : null,
     !episodes.length ? h('div', {className:'xyz-empty'}, subscriptionCount ? '暂无' : '还没有本地订阅，点「全部订阅」手动拉取一次。') :
       h('div', {className:'xyz-list'}, ...episodes.map(ep => h('div', {key:ep.eid, className:'xyz-feed-item'},
-        h(EpisodeRow, {ep:{...ep, image:ep.subscriptionImage || ep.image, podcastTitle:ep.subscriptionTitle || ep.podcastTitle}, player, onAdd:()=>add([ep]), addDisabled:busy, subtitle:`${ep.subscriptionTitle || ep.podcastTitle || ''}${ep.isCoCreated ? ' · 共创' : ''}${ep.pubDate ? ` · ${relTime(ep.pubDate)}` : ''}${ep.duration ? ` · ${Math.round(ep.duration/60)} 分钟` : ''}`}),
+        h(EpisodeRow, {ep:{...ep, image:ep.subscriptionImage || ep.image, podcastTitle:ep.subscriptionTitle || ep.podcastTitle}, player, onAdd:where=>add([ep],where), addDisabled:busy, subtitle:`${ep.subscriptionTitle || ep.podcastTitle || ''}${ep.isCoCreated ? ' · 共创' : ''}${ep.pubDate ? ` · ${relTime(ep.pubDate)}` : ''}${ep.duration ? ` · ${Math.round(ep.duration/60)} 分钟` : ''}`}),
         h('button', {type:'button', className:'xyz-btn xyz-feed-ignore', disabled:busy, title:`忽略：${ep.title}`, onClick:()=>dismiss([ep.eid])}, '忽略')))),
     h('div', {className:'xyz-hint xyz-feed-footnote'}, '仅检查本地订阅 · 订阅列表只在你手动刷新时同步'));
 }

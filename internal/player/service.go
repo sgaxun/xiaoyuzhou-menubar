@@ -179,6 +179,23 @@ func (s *Service) dispatch(ctx context.Context, action string, q url.Values, bod
 	force := q.Get("refresh") == "1"
 	ok := object{"ok": true}
 	switch action {
+	case "library":
+		library := s.state["library"]
+		if library == nil {
+			library = emptyLibrary()
+		}
+		return object{"ok": true, "library": clone(obj(library))}, nil
+	case "saveLibrary":
+		library, err := validateLibrary(body)
+		if err != nil {
+			return nil, err
+		}
+		next := clone(s.state)
+		next["library"] = library
+		if err := s.saveState(next); err != nil {
+			return nil, err
+		}
+		return object{"ok": true, "library": clone(library)}, nil
 	case "setEpisodeUpdateAutomatic":
 		enabled, valid := body["enabled"].(bool)
 		if !valid {
@@ -219,7 +236,13 @@ func (s *Service) dispatch(ctx context.Context, action string, q url.Values, bod
 		if err != nil {
 			return nil, err
 		}
-		return object{"ok": true, "state": clone(s.state), "loggedIn": access != ""}, nil
+		view := clone(s.state)
+		queue := []any{}
+		for _, v := range list(view["queue"]) {
+			queue = append(queue, s.queueSubscriptionSource(obj(v)))
+		}
+		view["queue"] = queue
+		return object{"ok": true, "state": view, "loggedIn": access != ""}, nil
 	case "saveQueue":
 		next := clone(s.state)
 		next["queue"] = list(body["queue"])

@@ -1,6 +1,6 @@
 // Keep exactly one distributable DMG after a successful, verified build.
 import {spawnSync} from 'node:child_process';
-import {readFile,readdir,copyFile,unlink,mkdir,rm} from 'node:fs/promises';
+import {readFile,readdir,copyFile,unlink,mkdir,rm,writeFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import {join} from 'node:path';
 const root=fileURLToPath(new URL('..',import.meta.url));
@@ -14,6 +14,13 @@ run(go,['run','./scripts/icon']);
 run('npm',['run','build:ui']);
 // Build from a clean staging directory.
 await rm(join(root,'resources/bin'),{recursive:true,force:true});
+if(process.platform==='darwin'){
+ const shareApp=join(root,'resources/bin/小宇宙分享助手.app');
+ await mkdir(join(shareApp,'Contents/MacOS'),{recursive:true});
+ await writeFile(join(shareApp,'Contents/Info.plist'),`<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>dev.sgaxun.xiaoyuzhou-player.share</string><key>CFBundleName</key><string>小宇宙分享助手</string><key>CFBundleExecutable</key><string>share-helper</string><key>CFBundlePackageType</key><string>APPL</string><key>LSUIElement</key><true/><key>LSMinimumSystemVersion</key><string>12.0</string></dict></plist>`);
+ run('xcrun',['swiftc','-O','-target','arm64-apple-macosx12.0','native/share.swift','-o',join(shareApp,'Contents/MacOS/share-helper')]);
+ run('codesign',['--force','--sign','-',shareApp]);
+}
 await rm(join(root,'build'),{recursive:true,force:true});
 run(go,['run','github.com/egoist/mygo/cmd/mygo@v0.8.3','build','-skip-notarize']);
 const {version,slug}=JSON.parse(await readFile(join(root,'mygo.json'),'utf8'));

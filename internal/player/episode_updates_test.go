@@ -253,3 +253,45 @@ func TestEpisodeUpdatesSubscribedSourceAndLegacyCache(t *testing.T) {
 		t.Fatal("ordinary episode marked as collaboration")
 	}
 }
+
+func TestQueueSubscriptionSourceSurvivesSaveAndRestart(t *testing.T) {
+	at := time.Now().Add(-time.Minute)
+	eps := []any{object{"eid": "shared-episode", "title": "Shared", "pubDate": at.UTC().Format(time.RFC3339), "podcast": object{"pid": "1123456789abcdef01234567", "title": "Partner", "image": object{"picUrl": "partner.png"}}}}
+	fail, calls := false, 0
+	s := updateTestService(t, &eps, &fail, &calls)
+	sub := obj(list(obj(s.cache["subs"])["value"])[0])
+	sub["image"] = "subscribed.png"
+	if err := s.saveCache(); err != nil {
+		t.Fatal(err)
+	}
+	call(t, s, "checkEpisodeUpdates", nil)
+	if err := s.writeTokens("local-test-token", ""); err != nil {
+		t.Fatal(err)
+	}
+	// A legacy saved queue retained the canonical title/image but lost its source.
+	legacy := object{"eid": "shared-episode", "pid": "1123456789abcdef01234567", "title": "Shared", "podcastTitle": "Partner", "image": "partner.png"}
+	call(t, s, "saveQueue", object{"queue": []any{legacy}, "index": 0})
+	view := obj(call(t, s, "state", nil)["state"])
+	restored := obj(list(view["queue"])[0])
+	if str(restored["subscriptionTitle"]) != "Program" || str(restored["subscriptionImage"]) != "subscribed.png" || !flag(restored["isCoCreated"]) {
+		t.Fatal(restored)
+	}
+	if str(restored["podcastTitle"]) != "Partner" || str(restored["image"]) != "partner.png" {
+		t.Fatal("canonical metadata overwritten", restored)
+	}
+	call(t, s, "saveQueue", object{"queue": view["queue"], "index": 0})
+	reopened, err := NewWithClient(s.dir, s.client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again := obj(list(obj(call(t, reopened, "state", nil)["state"])["queue"])[0])
+	if str(again["subscriptionPid"]) != updatePID || str(again["subscriptionTitle"]) != "Program" || calls != 1 {
+		t.Fatal(again, calls)
+	}
+	// Multiple possible local sources must not invent an attribution.
+	s.cache["subs"] = object{"value": []any{sub, object{"pid": "2123456789abcdef01234567", "title": "Other"}}}
+	obj(obj(s.state["episodeUpdates"])["programs"])["2123456789abcdef01234567"] = object{"seen": object{"shared-episode": true}}
+	if str(s.queueSubscriptionSource(legacy)["subscriptionTitle"]) != "" {
+		t.Fatal("ambiguous source was guessed")
+	}
+}

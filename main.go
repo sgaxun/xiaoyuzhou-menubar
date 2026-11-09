@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -21,13 +22,14 @@ import (
 var page string
 
 type Backend struct {
-	service  *player.Service
-	updates  *appupdate.Controller
-	win      *mygo.Window
-	tray     *mygo.Tray
-	mediaMu  sync.Mutex
-	title    string
-	quitting bool
+	service            *player.Service
+	updates            *appupdate.Controller
+	win                *mygo.Window
+	tray               *mygo.Tray
+	mediaMu            sync.Mutex
+	nativeShareDialogs atomic.Int32
+	title              string
+	quitting           bool
 }
 
 // Request dispatches directly to the Go backend. No subprocess or local server.
@@ -88,7 +90,9 @@ func (b *Backend) ready() {
 	}
 	b.win = mygo.NewWindow(mygo.WindowOptions{Title: "小宇宙播放器", Width: 460, Height: 620, Hidden: true, Frameless: true, DisableResize: true, DisableMinimize: true, DisableMaximize: true, DisableFullScreen: true, AlwaysOnTop: true, SkipTaskbar: true, Page: mygo.PageOptions{Autoplay: mygo.AutoplayAllow, BackgroundThrottling: mygo.ThrottlingOff}})
 	b.win.OnBlur(func() {
-		b.win.Hide()
+		if b.nativeShareDialogs.Load() == 0 {
+			b.win.Hide()
+		}
 	})
 	b.win.OnClose(func(e *mygo.CloseEvent) {
 		if !b.quitting {

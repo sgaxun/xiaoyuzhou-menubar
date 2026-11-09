@@ -1,4 +1,10 @@
 import React from 'react';
+import {queueEpisode,episodeImage,episodePodcast} from './episode.js';
+import {SeekBar} from './seek-bar.js';
+import {FullTitle} from './full-title.js';
+import {QueueAdd} from './queue-add.js';
+import {BackupSettings, SleepTimer, EpisodeActions} from './listening-tools.js';
+import {ShareDialog} from './share.js';
 import {EpisodeUpdates, EpisodeUpdateSettings} from './episode-updates.js';
 import {useUpdates,UpdateSettings,UpdateBanner} from './updates.js';
 import DOMPurify from 'dompurify';
@@ -157,11 +163,11 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
     .xyz-card-duration{align-self:flex-end;flex:0 0 auto;font-size:11px;line-height:1.3;opacity:.55;font-variant-numeric:tabular-nums;white-space:nowrap}
     .xyz-card-sub.err{color:var(--dsw-alias-state-error-primary,#e5484d);opacity:1;white-space:normal;
       display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
-    .xyz-seek{position:relative;height:3px;border-radius:2px;cursor:pointer;
-      background:color-mix(in srgb, var(--dsw-alias-label-primary,#888) 16%, transparent)}
-    .xyz-seek:hover{height:5px}
-    .xyz-seek>i{position:absolute;inset:0 auto 0 0;border-radius:2px;
-      background:var(--dsw-alias-brand-primary,#5b6bf5)}
+    .xyz-seek{position:relative;height:15px;margin:-6px 0;cursor:pointer;flex-shrink:0}
+    .xyz-seek-track{position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);height:3px;border-radius:2px;overflow:hidden}
+    .xyz-seek:hover .xyz-seek-track{height:4px}
+    .xyz-seek-track>i{display:block;height:100%;border-radius:inherit}
+    .xyz-seek-preview{position:absolute;bottom:calc(100% + 2px);transform:translateX(-50%);width:64px;box-sizing:border-box;padding:4px 6px;border-radius:5px;background:var(--app-play);color:var(--app-play-ink);font-size:11px;font-weight:500;line-height:16px;text-align:center;font-variant-numeric:tabular-nums;white-space:nowrap;pointer-events:none;z-index:2;box-shadow:0 2px 8px #0002}
     .xyz-card-foot{display:flex;align-items:center;justify-content:space-between;gap:6px;min-height:28px}
     .xyz-tnum{font-size:10.5px;font-variant-numeric:tabular-nums;opacity:.5;white-space:nowrap;flex:0 0 auto}
     .xyz-controls{display:flex;align-items:center;gap:0;flex:0 0 auto}
@@ -280,12 +286,55 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
       const [rate, setRate] = useState(1);
       const [volume, setVolume] = useState(0.8);
       const [error, setError] = useState('');
+      const [library,setLibrary] = useState({bookmarks:{},completed:{},podcastRates:{}});
+      const libraryRef=useRef(library), libraryWrites=useRef(Promise.resolve());
+      const [playStatus,setPlayStatus]=useState('idle');
+      const playRequestRef=useRef(0);
+      const rateRef=useRef(rate);rateRef.current=rate;
+      const [sleepMode,setSleepModeState]=useState('off');
+      const sleepRef=useRef({mode:'off',deadline:0});
+      const [sleepRemaining,setSleepRemaining]=useState(0);
+      const setSleepMode=useCallback(value=>{
+        const minutes=Number(value);
+        const valid=Number.isFinite(minutes)&&minutes>0&&Number.isSafeInteger(Math.round(Date.now()+minutes*60000))&&Date.now()+minutes*60000<=8640000000000000;
+        const mode=value==='end'?'end':(valid?String(minutes):'off');
+        sleepRef.current={mode,deadline:mode!=='off'&&mode!=='end'?Date.now()+minutes*60000:0};
+        setSleepModeState(mode);setSleepRemaining(mode!=='off'&&mode!=='end'?minutes*60:0);
+      },[]);
+      useEffect(()=>{
+        const tick=()=>{const t=sleepRef.current;if(!t.deadline)return;
+          setSleepRemaining(Math.max(0,Math.ceil((t.deadline-Date.now())/1000)));
+          if(Date.now()>=t.deadline){playRequestRef.current++;audioRef.current?.pause();setPlayStatus('paused');setSleepMode('off')}
+        };
+        const timer=setInterval(tick,1000);return()=>clearInterval(timer);
+      },[setSleepMode]);
+      const hydrateLibrary=useCallback(value=>{const next={bookmarks:{},completed:{},podcastRates:{},...(value||{})};libraryRef.current=next;setLibrary(next)},[]);
+      const changeLibrary=useCallback(update=>{
+        const next=update(libraryRef.current);libraryRef.current=next;setLibrary(next);
+        const pending=libraryWrites.current.catch(()=>{}).then(()=>call('saveLibrary',next));
+        libraryWrites.current=pending;
+        pending.catch(err=>setError(`本地数据保存失败：${err.message}`));
+        return pending;
+      },[]);
+      const enqueue=useCallback((ep,where='end')=>{
+        if(!ep?.eid)return;
+        setQueue(prev=>{
+          if(currentRef.current?.eid===ep.eid)return prev;
+          const next=prev.filter(item=>item.eid!==ep.eid);
+          const currentIndex=next.findIndex(item=>item.eid===currentRef.current?.eid);
+          const at=where==='next'?currentIndex+1:next.length;
+          next.splice(at,0,ep);setIndex(currentIndex);return next;
+        });
+      },[]);
       const lastSent = useRef(0);
       const currentRef = useRef(null);
       currentRef.current = current;
       // 本地播放进度表：{ eid: { position, updatedAt } }，由 PlayerDock 注入。
       // 用于重启后从上次位置继续。
       const progressRef = useRef({});
+      // A chosen position can precede loading the media. It must survive metadata
+      // and pause events until the audio element actually reaches that position.
+      const pendingSeekRef = useRef(null);
       // 链接失效后自动换新链接的重试次数（每个单集最多 2 次，避免死循环）
       const retryRef = useRef({});
 
@@ -299,16 +348,18 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
         setDuration(0);
       }, [current?.eid]);
 
-      const sendProgress = useCallback((ep, pos, forced) => {
+      const sendProgress = useCallback((ep, pos, forced, reset = false) => {
         if (!ep || !ep.eid) return;
+        const pending = pendingSeekRef.current;
+        if (!reset && pending?.eid === ep.eid) pos = pending.position;
         if(Number.isFinite(pos)) {
           const previous=Number(progressRef.current?.[ep.eid]?.position)||0;
-          progressRef.current[ep.eid]={position:Math.max(previous,pos)};
+          progressRef.current[ep.eid]={position:reset?pos:Math.max(previous,pos)};
         }
         const now = Date.now();
         if (!forced && now - lastSent.current < 15000) return;
         lastSent.current = now;
-        call('progress', {
+        return call('progress', {
           eid: ep.eid,
           pid: ep.pid,
           title: ep.title,
@@ -316,18 +367,26 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
           image: ep.image,
           duration: ep.duration,
           position: Math.round(pos),
+          reset,
         }).catch(() => {});
       }, []);
 
       const play = useCallback(
         async (episode, resumeAt, options = {}) => {
+          const requestId=++playRequestRef.current;
           setError('');
+          setPlayStatus('loading');
           const audio = audioRef.current;
           if (!audio) return;
           setCurrent(episode);
+          currentRef.current=episode;
+          const programKey=episode.subscriptionPid||episode.pid;
+          const effectiveRate=Number(libraryRef.current.podcastRates[programKey])||rate;
+          setRate(effectiveRate);
 
           const allowResume = options.resume !== false;
           if (!allowResume && episode.eid) {
+            pendingSeekRef.current = null;
             // 显式从头播放：把这一集的进度归零，否则"只前进"保护会让它停在旧位置。
             if (progressRef.current?.[episode.eid]) progressRef.current[episode.eid].position = 0;
             call('progress', {
@@ -344,10 +403,11 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
           const savedPos = allowResume
             ? Number(progressRef.current?.[episode.eid]?.position) || 0
             : 0;
-          const start = Number.isFinite(resumeAt)
+          let start = Number.isFinite(resumeAt)
             ? resumeAt
             : savedPos || episode.resumeAt || 0;
-          audio.playbackRate = rate;
+          if(Number.isFinite(resumeAt))pendingSeekRef.current={eid:episode.eid,position:Math.max(0,resumeAt)};
+          audio.playbackRate = effectiveRate;
           audio.volume = volume;
 
           /** 等某个媒体事件（或条件已满足）。 */
@@ -437,12 +497,13 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
               url = d.url;
             } else if (d?.paid) {
               // 付费且未购买：明确提示，而不是静默从头播
-              setError(d.error || '该单集需先在小宇宙 App 内购买');
+              setError(d.error || '该单集需先在小宇宙 App 内购买');setPlayStatus('error');
               return;
             }
           } catch {
             /* 取不到就退回代理 */
           }
+          if(requestId!==playRequestRef.current)return;
           const sameEpisode = audio.dataset.xyzEid === episode.eid && audio.readyState > 0;
           if (!sameEpisode) {
             audio.dataset.xyzEid = episode.eid;
@@ -450,7 +511,10 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
             await waitFor('loadedmetadata', 8000);
           }
 
-          if (start > 0) {
+          if(requestId!==playRequestRef.current)return;
+          const requested = pendingSeekRef.current;
+          if (allowResume && requested?.eid === episode.eid) start = requested.position;
+          if (start > 0 || (allowResume && requested?.eid === episode.eid)) {
 
             // 同源同集时直接 seek 即可；数据已在，落位很快。
             let ok = await seekTo(start, 2500);
@@ -471,14 +535,15 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
 
           }
 
+          if(requestId!==playRequestRef.current)return;
           try {
             await audio.play();
           } catch (err) {
-            setError(`无法播放：${err.message}`);
+            setError(`无法播放：${err.message}`);setPlayStatus('error');
           }
 
           // play() 会重置倍速，这里重新应用。
-          audio.playbackRate = rate;
+          audio.playbackRate = effectiveRate;
           audio.volume = volume;
 
         },
@@ -520,17 +585,33 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
 
       const seek = useCallback((sec) => {
         const audio = audioRef.current;
-        if (!audio || !Number.isFinite(sec)) return;
-        audio.currentTime = Math.max(0, Math.min(sec, audio.duration || sec));
-        setPosition(audio.currentTime);
-      }, []);
+        const episode = currentRef.current;
+        if (!audio || !episode?.eid || !Number.isFinite(sec)) return;
+        const loaded = audio.dataset.xyzEid === episode.eid && audio.readyState >= 1;
+        const total = loaded && Number.isFinite(audio.duration) ? audio.duration : Number(episode.duration) || 0;
+        const target = Math.max(0, total > 0 ? Math.min(sec, total) : sec);
+        pendingSeekRef.current = {eid:episode.eid, position:target};
+        setPosition(target);
+        // An explicit seek may go backwards; save that choice rather than the
+        // maximum historical position. Do not fetch or play unloaded audio here.
+        sendProgress(episode, target, true, true);
+        if (loaded) {
+          try { audio.currentTime = target; } catch { /* Apply when media is ready. */ }
+        }
+      }, [sendProgress]);
 
+      const changeRate=useCallback(value=>{
+        if(!RATES.includes(value))return;
+        setRate(value);
+        const ep=currentRef.current,key=ep?.subscriptionPid||ep?.pid;
+        if(key)changeLibrary(prev=>({...prev,podcastRates:{...prev.podcastRates,[key]:value}}));
+        call('savePrefs',{rate:value}).catch(()=>{});
+      },[changeLibrary]);
       const cycleRate = useCallback(() => {
         const idx = RATES.indexOf(rate);
         const next = RATES[(idx + 1) % RATES.length];
-        setRate(next);
-        call('savePrefs', { rate: next, volume }).catch(() => {});
-      }, [rate, volume]);
+        changeRate(next);
+      }, [rate, changeRate]);
 
       const changeVolume = useCallback(
         (v) => {
@@ -560,23 +641,38 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
         const audio = audioRef.current;
         if (!audio) return undefined;
         const onTime = () => {
+          const pending = pendingSeekRef.current;
+          if (pending?.eid === currentRef.current?.eid) {
+            if (audio.dataset.xyzEid !== pending.eid || audio.readyState < 1 || Math.abs(audio.currentTime-pending.position) > 1) return;
+            pendingSeekRef.current = null;
+          }
           setPosition(audio.currentTime);
           if (audio.currentTime > 5) sendProgress(currentRef.current, audio.currentTime, false);
         };
-        const onMeta = () => setDuration(audio.duration || currentRef.current?.duration || 0);
+        const applyPendingSeek = () => {
+          const pending = pendingSeekRef.current;
+          if (pending?.eid !== currentRef.current?.eid || audio.dataset.xyzEid !== pending?.eid || audio.readyState < 1) return;
+          try { audio.currentTime = pending.position; } catch { /* Wait for canplay. */ }
+        };
+        const onMeta = () => {
+          setDuration(audio.duration || currentRef.current?.duration || 0);
+          applyPendingSeek();
+        };
         const onPlay = () => {
           setPlaying(true);
           const eid = currentRef.current?.eid;
           if (eid) retryRef.current[eid] = 0;
           // 起播瞬间再校正一次倍速，兜住浏览器的延迟重置。
-          if (audio.playbackRate !== rate) audio.playbackRate = rate;
+          if (audio.playbackRate !== rateRef.current) audio.playbackRate = rateRef.current;
         };
         const onPause = () => {
+          setPlayStatus('paused');
           setPlaying(false);
-          if (currentRef.current) sendProgress(currentRef.current, audio.currentTime, true);
+          if (currentRef.current && audio.dataset.xyzEid===currentRef.current.eid) sendProgress(currentRef.current, audio.currentTime, true);
         };
         const onEnded = () => {
           setPlaying(false);
+          setPlayStatus('paused');
           const finished = currentRef.current;
           if (finished) {
             sendProgress(finished, audio.duration || 0, true);
@@ -586,12 +682,13 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
 
           // 播完即从播放列表移除，然后接上下一集。
           const currentIdx = queue.findIndex((e) => finished && e.eid === finished.eid);
-          const dropIdx = currentIdx >= 0 ? currentIdx : index;
+          const dropIdx = currentIdx;
           const remaining = queue.filter((_, i) => i !== dropIdx);
 
           // 移除后，原位置就是"下一个"；若已越过末尾则说明这集是最后一个。
-          const nextIdx = dropIdx;
+          const nextIdx = Math.max(0,dropIdx);
           if (nextIdx >= remaining.length) {
+            if(sleepRef.current.mode==='end')setSleepMode('off');
             setQueue(remaining);
             setIndex(-1);
             setCurrent(null);
@@ -601,6 +698,9 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
 
           setQueue(remaining);
           setIndex(nextIdx);
+          if(sleepRef.current.mode==='end'){
+            setSleepMode('off');audio.removeAttribute('src');delete audio.dataset.xyzEid;audio.load();setCurrent(remaining[nextIdx]);setPosition(0);return;
+          }
           play(remaining[nextIdx]);
         };
         const onErr = async () => {
@@ -636,17 +736,25 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
               }
             }
           }
-          setError('音频加载失败，链接可能已过期，请重新点一次');
+          setPlayStatus('error');setError('音频加载失败，可点击重试');
         };
+        const onWaiting=()=>{if(!audio.paused)setPlayStatus('buffering')};
+        const onPlaying=()=>{setPlayStatus('playing');setError('')};
+        audio.addEventListener('waiting',onWaiting);audio.addEventListener('stalled',onWaiting);audio.addEventListener('playing',onPlaying);
         audio.addEventListener('timeupdate', onTime);
         audio.addEventListener('loadedmetadata', onMeta);
+        audio.addEventListener('canplay', applyPendingSeek);
+        audio.addEventListener('seeked', onTime);
         audio.addEventListener('play', onPlay);
         audio.addEventListener('pause', onPause);
         audio.addEventListener('ended', onEnded);
         audio.addEventListener('error', onErr);
         return () => {
+          audio.removeEventListener('waiting',onWaiting);audio.removeEventListener('stalled',onWaiting);audio.removeEventListener('playing',onPlaying);
           audio.removeEventListener('timeupdate', onTime);
           audio.removeEventListener('loadedmetadata', onMeta);
+          audio.removeEventListener('canplay', applyPendingSeek);
+          audio.removeEventListener('seeked', onTime);
           audio.removeEventListener('play', onPlay);
           audio.removeEventListener('pause', onPause);
           audio.removeEventListener('ended', onEnded);
@@ -664,7 +772,29 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
         return () => window.removeEventListener('pagehide', flush);
       }, [sendProgress]);
 
+      const flushLocalData=useCallback(async(pause=false)=>{
+        if(pause){playRequestRef.current++;audioRef.current?.pause()}
+        await libraryWrites.current;
+        const ep=currentRef.current,a=audioRef.current;
+        if(ep){const pos=pendingSeekRef.current?.eid===ep.eid?pendingSeekRef.current.position:(a?.dataset.xyzEid===ep.eid&&a.readyState>0?a.currentTime:(Number(progressRef.current?.[ep.eid]?.position)||0));await sendProgress(ep,pos,true)}
+        await call('saveQueue',{queue:queue.map(queueEpisode),index});
+      },[queue,index,sendProgress]);
+      const reloadLocalState=useCallback(async()=>{
+        await libraryWrites.current;
+        const d=await call('state'), state=d.state||{};
+        playRequestRef.current++;audioRef.current?.pause();if(audioRef.current){audioRef.current.removeAttribute('src');audioRef.current.load()}
+        pendingSeekRef.current=null;progressRef.current=state.progress||{};
+        hydrateLibrary(state.library);
+        setQueue(state.queue||[]);const idx=Math.max(0,Math.min(Number(state.queueIndex)||0,(state.queue||[]).length-1));
+        setIndex((state.queue||[]).length?idx:-1);setCurrent(state.queue?.[idx]||null);setPosition(0);setDuration(0);setError('');setPlayStatus('idle');
+        if(Number(state.rate)>0)setRate(Number(state.rate));
+        if(Number(state.volume)>=0&&Number(state.volume)<=1)setVolume(Number(state.volume));
+        setSleepMode('off');
+      },[hydrateLibrary,setSleepMode]);
+      const retry=()=>{const ep=currentRef.current;if(!ep)return;retryRef.current[ep.eid]=0;const pos=pendingSeekRef.current?.eid===ep.eid?pendingSeekRef.current.position:position;const a=audioRef.current;a?.removeAttribute('src');a?.load();play(ep,pos)};
       return {
+        library,hydrateLibrary,changeLibrary,enqueue,reloadLocalState,flushLocalData,
+        playStatus,retry,sleepMode,setSleepMode,sleepRemaining,changeRate,
         audioRef, progressRef, current, setCurrent, queue, setQueue, index, setIndex,
         playing, position, duration, rate, volume, error, setError, setRate, setVolume,
         play, playAt, toggle, step, seek, cycleRate, changeVolume,
@@ -676,14 +806,6 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
       const { player, onOpen, wide, onTitleToggle, notesOpen } = props;
       const { current, playing, position, duration, error } = player;
       const total = duration || current?.duration || 0;
-      const pct = total > 0 ? Math.min(100, (position / total) * 100) : 0;
-
-      const seek = (e) => {
-        const rect = e.currentTarget.getBoundingClientRect();
-        const ratio = (e.clientX - rect.left) / rect.width;
-        if (total > 0) player.seek(ratio * total);
-      };
-
       // 收起成窄栏：一个图标按钮即可。
       if (!wide) {
         return h(
@@ -715,27 +837,24 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
           'div',
           { className: 'xyz-card-top', onClick: onTitleToggle, role:'button',tabIndex:0,'aria-label':'切换节目介绍','aria-expanded':!!notesOpen,onKeyDown:e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();onTitleToggle()}},title: notesOpen ? '收起 shownotes' : '查看 shownotes' },
           current
-            ? h('img', { className: 'xyz-cover', src: imageOf(current.image), alt: '' })
+            ? h('img', { className: 'xyz-cover', src: imageOf(episodeImage(current)), alt: '' })
             : h('div', { className: 'xyz-cover empty' }, IconMic(18)),
           h(
             'div',
             { className: 'xyz-card-text' },
-            h('div', { className: 'xyz-card-title' }, current ? current.title : '小宇宙播客'),
+            h(FullTitle,{className:'xyz-card-title',text:current?current.title:'小宇宙播客'}),
             h(
               'div',
               { className: error ? 'xyz-card-sub err' : 'xyz-card-sub' },
-              error ? error : current ? current.podcastTitle || '正在播放' : '点开选择节目',
+              error ? error : ['loading','buffering'].includes(player.playStatus) ? (player.playStatus==='loading'?'正在加载音频…':'正在缓冲…') : current ? episodePodcast(current) || '正在播放' : '点开选择节目',
             ),
           ),
           current ? h('span', {className:'xyz-card-duration', 'aria-label':`总时长 ${total > 0 ? mmss(total) : '未知'}`, title:'总时长'}, total > 0 ? mmss(total) : '--:--') : null,
         ),
 
-        // 进度条
-        h(
-          'div',
-          { className: 'xyz-seek', role: 'slider', tabIndex: 0, 'aria-label': '播放进度', 'aria-valuemin':0, 'aria-valuemax':total, 'aria-valuenow':Math.min(position,total)||0, 'aria-valuetext':`${mmss(position)} / ${mmss(total)}`, title:`${playing?'当前进度':'续播位置'}：${mmss(position)} / ${mmss(total)}`, onClick: duration>0?seek:undefined },
-          h('i', { style: { width: `${pct}%` } }),
-        ),
+        error ? h('button',{className:'xyz-btn',onClick:player.retry},'重试播放') : null,
+        // Hover preview is independent of playback; only clicking changes time.
+        h(SeekBar, {episodeId:current?.eid,total,position,seekable:!!current && total>0,onSeek:player.seek,formatTime:mmss}),
 
         // 时间 + 控制
         h(
@@ -771,6 +890,7 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
             }, IconNext(14)),
           ),
           h('div',{className:'xyz-controls-aux'},
+            h(SleepTimer,{player}),
             h('button', { className: 'xyz-rate', title: '倍速', onClick: player.cycleRate }, `${player.rate}×`),
             h('button', { className: 'xyz-icon-btn', title: '播放列表', onClick: onOpen }, IconList(15)),
           ),
@@ -786,17 +906,6 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
     function EpisodeRow(props) {
       const { ep, player, rank, subtitle, onPlay, onAdd, addDisabled } = props;
       const showNotes=React.useContext(NotesContext);
-      const inQ = player.queue.some((q) => q.eid === ep.eid);
-      const toggle = (e) => {
-        e.stopPropagation();
-        if (onAdd) { onAdd(); return; }
-        if (inQ) {
-          player.setQueue(player.queue.filter((q) => q.eid !== ep.eid));
-          return;
-        }
-        player.setQueue(player.queue.concat([ep]));
-        if (player.index < 0) player.setIndex(0);
-      };
       const playIt = () => {
         if (onPlay) onPlay();
         else {
@@ -807,34 +916,20 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
       const sub =
         subtitle !== undefined
           ? subtitle
-          : `${ep.podcastTitle || ''}${ep.duration ? ` · ${mmss(ep.duration)}` : ''}`;
+          : `${episodePodcast(ep)}${ep.duration ? ` · ${mmss(ep.duration)}` : ''}`;
       return h(
         'div',
         { className: 'xyz-row xyz-row-hover','data-eid':ep.eid,onClick:()=>showNotes(ep),tabIndex:0,role:'group','aria-label':ep.title,onKeyDown:e=>{if(e.target===e.currentTarget&&(e.key==='Enter'||e.key===' ')){e.preventDefault();showNotes(ep)}} },
         rank !== undefined ? h('span', { className: 'xyz-rank' }, String(rank)) : null,
-        h('img', { src: imageOf(ep.image), alt: '' }),
+        h('img', { src: imageOf(episodeImage(ep)), alt: '' }),
         h(
           'div',
           { className: 'xyz-row-main', style: { cursor: 'pointer' } },
-          h('div', { className: 'xyz-row-t' }, ep.title),
+          h(FullTitle, {className:'xyz-row-t',text:ep.title}),
           h('div', { className: 'xyz-row-s' }, sub),
         ),
         h('button',{className:'xyz-icon-btn xyz-episode-play',title:'播放这期节目',onClick:e=>{e.stopPropagation();playIt()}},IconPlay(14)),
-        h(
-          'button',
-          {
-            className: inQ ? 'xyz-row-action added' : 'xyz-row-action',
-            title: inQ ? '已在播放列表' : '加入播放列表',
-            disabled: !!addDisabled || (!!onAdd && inQ),
-            onClick: toggle,
-          },
-          h(
-            'svg',
-            { width: 14, height: 14, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor',
-              strokeWidth: 2, strokeLinecap: 'round' },
-            h('path', { d: inQ ? 'M4 12.5l5 5L20 6.5' : 'M12 5v14M5 12h14' }),
-          ),
-        ),
+        h(QueueAdd,{episode:ep,player,disabled:!!addDisabled,onAdd}),
       );
     }
 
@@ -1495,18 +1590,18 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
                           h('circle', { cx: 9, cy: 12, r: 1.6 }), h('circle', { cx: 15, cy: 12, r: 1.6 }),
                           h('circle', { cx: 9, cy: 18, r: 1.6 }), h('circle', { cx: 15, cy: 18, r: 1.6 })),
                       ),
-                      h('img', { src: imageOf(ep.image), alt: '' }),
+                      h('img', { src: imageOf(episodeImage(ep)), alt: '' }),
                       h(
                         'div',
                         { className: 'xyz-row-main' },
-                        h('div', { className: 'xyz-row-t' }, ep.title),
+                        h(FullTitle, {className:'xyz-row-t',text:ep.title}),
                         h(
                           'div',
                           { className: 'xyz-row-s' },
                           (() => {
                             const pos = Number(state?.progress?.[ep.eid]?.position) || 0;
                             const total = Number(ep.duration) || 0;
-                            const parts = [ep.podcastTitle || ''];
+                            const parts = [episodePodcast(ep)];
                             if (pos >= 5) parts.push(`上次听到 ${mmss(pos)}`);
                             else if (total) parts.push(mmss(total));
                             return parts.filter(Boolean).join(' · ');
@@ -1733,7 +1828,7 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
                                   'div',
                                   { className: 'xyz-tile-thumbs' },
                                   ...board.episodes.slice(0, 3).map((ep) =>
-                                    h('img', { key: ep.eid, src: imageOf(ep.image), alt: '' }),
+                                    h('img', { key: ep.eid, src: imageOf(episodeImage(ep)), alt: '' }),
                                   ),
                                 ),
                               ),
@@ -1763,7 +1858,7 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
                                 { className: 'xyz-tile-thumbs' },
                                 ...(((discover.picks || [])[0]?.episodes) || [])
                                   .slice(0, 3)
-                                  .map((ep) => h('img', { key: ep.eid, src: imageOf(ep.image), alt: '' })),
+                                  .map((ep) => h('img', { key: ep.eid, src: imageOf(episodeImage(ep)), alt: '' })),
                               ),
                             ),
                           )
@@ -1804,7 +1899,7 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
           tab === 'settings'
             ? h(
                 'div',
-                { style: { display: 'flex', flexDirection: 'column', gap: 14 } },
+                { className:'xyz-settings-page' },
 
                 // —— 账户 ——
                 h('div',{className:'xyz-section'},
@@ -1834,7 +1929,7 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
                       'div',
                       { className: 'xyz-setting-label' },
                       h('div', { className: 'xyz-setting-name' }, '默认播放倍速'),
-                      h('div', { className: 'xyz-setting-desc' }, '开始播放时自动使用这个速度'),
+                      h('div', { className: 'xyz-setting-desc' }, '调整后会按节目记忆播放速度'),
                     ),
                     h(
                       'div',
@@ -1847,7 +1942,7 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
                             className: 'xyz-seg-item',
                             'data-active': String(Math.abs(player.rate - r) < 0.001),
                             onClick: () => {
-                              player.setRate(r);
+                              player.changeRate(r);
                               call('savePrefs', { rate: r, volume: player.volume }).catch(() => {});
                             },
                           },
@@ -1858,11 +1953,13 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
                   ),
                 ),
 
+                h(EpisodeUpdateSettings,{call}),
+
                 // —— 数据 ——
                 h(
                   'div',
                   { className: 'xyz-section' },
-                  h('div', { className: 'xyz-section-title' }, '数据'),
+                  h('div', { className: 'xyz-section-title' }, '本地数据'),
                   h(
                     'div',
                     { className: 'xyz-setting-row' },
@@ -1893,10 +1990,10 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
                   h(
                     'div',
                     { className: 'xyz-hint' },
-                    '播放列表和倍速设置保存在本机，不会因为刷新或更新程序而丢失。',
+                    '清除订阅缓存不会删除播放列表和进度。',
                   ),
+                  h(BackupSettings,{player}),
                 ),
-                h(EpisodeUpdateSettings,{call}),
                 h(UpdateSettings,{updates,player}),
               )
             : null,
@@ -1904,7 +2001,7 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
       );
     }
 
-    function EpisodeNotes({episode,onClose}) {
+    function EpisodeNotes({episode,onClose,onShare,player}) {
       const [data,setData]=useState(null),[error,setError]=useState('');
       const eid=episode?.eid;
       useEffect(()=>{
@@ -1912,13 +2009,37 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
         if(eid)call(`shownotes?eid=${encodeURIComponent(eid)}`).then(d=>{if(alive)setData(d)}).catch(e=>{if(alive)setError(e.message)});
         return()=>{alive=false};
       },[eid]);
-      const html=useMemo(()=>DOMPurify.sanitize(data?.html||'',{USE_PROFILES:{html:true},FORBID_TAGS:['audio','video','iframe','form','input','button','style','link','meta'],FORBID_ATTR:['style','id','name'],SANITIZE_NAMED_PROPS:true}),[data?.html]);
+      const timeHTML=useMemo(()=>{
+        const doc=new DOMParser().parseFromString(data?.html||'','text/html');
+        const walker=doc.createTreeWalker(doc.body,NodeFilter.SHOW_TEXT);const nodes=[];
+        while(walker.nextNode())if(!walker.currentNode.parentElement.closest('a,script,style,code,pre'))nodes.push(walker.currentNode);
+        for(const node of nodes){const text=node.textContent;const re=/(?<![\d:])(?:(\d{1,2}):)?(\d{1,3}):([0-5]\d)(?![\d:])/g;let match,last=0;const fragment=doc.createDocumentFragment();
+          while((match=re.exec(text))){const seconds=match[1]?Number(match[1])*3600+Number(match[2])*60+Number(match[3]):Number(match[2])*60+Number(match[3]);if(match[1]&&Number(match[2])>59)continue;
+            fragment.append(text.slice(last,match.index));const a=doc.createElement('a');a.href=`#ts=${seconds}`;a.textContent=match[0];a.setAttribute('aria-label',`跳转到 ${match[0]}`);fragment.append(a);last=re.lastIndex;
+          }if(last){fragment.append(text.slice(last));node.replaceWith(fragment)}
+        }
+        for(const a of doc.body.querySelectorAll('a')){
+          const stamp=a.textContent.trim();
+          if(/^\d{1,3}:[0-5]\d(?::[0-5]\d)?$/.test(stamp)){
+            const seconds=stamp.split(':').reduce((v,n)=>v*60+Number(n),0);
+            a.setAttribute('href',`#ts=${seconds}`);a.setAttribute('aria-label',`跳转到 ${stamp}`);a.setAttribute('title',`跳转到 ${stamp}`);
+          }
+        }
+        return doc.body.innerHTML;
+      },[data?.html]);
+      const html=useMemo(()=>DOMPurify.sanitize(timeHTML,{USE_PROFILES:{html:true},FORBID_TAGS:['audio','video','iframe','form','input','button','style','link','meta'],FORBID_ATTR:['style','id','name'],SANITIZE_NAMED_PROPS:true}),[timeHTML]);
       const follow=e=>{
         const a=e.target.closest('a');if(!a)return;e.preventDefault();
-        try{const href=new URL(a.getAttribute('href')||'',`https://www.xiaoyuzhoufm.com/episode/${eid}`).href;window.mygo.call('Backend.OpenLink',href).catch(err=>setError(err.message))}catch{setError('链接无法打开')}
+        const raw=a.getAttribute('href')||'';
+        const ts=raw.match(/^#(?:ts=)?(\d+)$/);
+        let seconds=ts?Number(ts[1]):null;
+        if(seconds===null&&/^\d{1,3}:[0-5]\d(?::[0-5]\d)?$/.test(a.textContent.trim()))seconds=a.textContent.trim().split(':').reduce((v,n)=>v*60+Number(n),0);
+        if(seconds!==null){const total=episode?.eid===player.current?.eid?(player.duration||episode.duration):episode?.duration;if(total&&seconds>total){setError('时间点超出本期节目时长');return}
+          if(player.current?.eid===eid)player.seek(seconds);else{player.setIndex(player.queue.findIndex(ep=>ep.eid===eid));player.play(episode,seconds)}return;}
+        try{const href=new URL(raw,`https://www.xiaoyuzhoufm.com/episode/${eid}`).href;window.mygo.call('Backend.OpenLink',href).catch(err=>setError(err.message))}catch{setError('链接无法打开')}
       };
       return h('section',{className:'xyz-notes',role:'region','aria-label':'本期 shownotes'},
-        h('div',{className:'xyz-notes-head'},h('button',{className:'xyz-btn',onClick:onClose,title:'返回之前的页面'},'‹ 返回'),h('span',{className:'xyz-notes-title'},episode?.title||'节目介绍')),
+        h('div',{className:'xyz-notes-head'},h('button',{className:'xyz-btn',onClick:onClose,title:'返回之前的页面'},'‹ 返回'),h(EpisodeActions,{episode,player}),h(FullTitle,{as:'span',className:'xyz-notes-title',text:episode?.title||'节目介绍'}),episode?.eid?h('button',{type:'button',className:'xyz-btn xyz-notes-share',style:{marginLeft:'auto',flexShrink:0},onClick:onShare},h('svg',{width:14,height:14,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:1.8,strokeLinecap:'round',strokeLinejoin:'round','aria-hidden':true,focusable:'false'},h('path',{d:'M12 15V3m-4 4 4-4 4 4M7 10H5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-9a1 1 0 0 0-1-1h-2'})),'分享'):null),
         !eid?h('div',{className:'xyz-empty'},'先选择一集节目'):
         error?h('div',{className:'xyz-notes-message'},error):
         !data?h('div',{className:'xyz-notes-message'},'正在加载 shownotes…'):
@@ -1936,6 +2057,7 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
           const [tab, setTab] = useState('queue');
           const [notesOpen,setNotesOpen]=useState(false);
           const [notesEpisode,setNotesEpisode]=useState(null);
+          const [shareSnapshot,setShareSnapshot]=useState(null);
           const showEpisodeNotes=ep=>{setNotesEpisode(ep);setNotesOpen(true)};
           playerRef.current = player;
 
@@ -1965,7 +2087,7 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
               previous: () => playerRef.current.step(-1),
               seek: pos => playerRef.current.seek(pos),
               flush: () => {const p=playerRef.current;p.sendProgress(p.current,p.audioRef.current?.currentTime||0,true)},
-              status: () => { const p=playerRef.current,a=p.audioRef.current; return {title:p.current?.title||'',artist:p.current?.podcastTitle||'',playing:!!a&&!a.paused,position:a?.currentTime||0,duration:Number.isFinite(a?.duration)?a.duration:0,rate:a?.playbackRate||p.rate,error:p.error,queue:p.queue.length,muted:a?.muted||false}; }
+              status: () => { const p=playerRef.current,a=p.audioRef.current; return {title:p.current?.title||'',artist:episodePodcast(p.current),playing:!!a&&!a.paused,position:a?.currentTime||0,duration:Number.isFinite(a?.duration)?a.duration:0,rate:a?.playbackRate||p.rate,error:p.error,queue:p.queue.length,muted:a?.muted||false}; }
             };
             const tick=setInterval(()=>{const s=window.menuPlayer.status();window.mygo.call('Backend.MediaState',s.title,s.artist,s.playing,s.position,s.duration).catch(()=>{})},2000);
             return()=>clearInterval(tick);
@@ -1981,13 +2103,15 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
             call('state')
               .then((d) => {
                 // 注入本地进度表，供 play 时查续播位置
+                player.hydrateLibrary(d?.state?.library);
                 player.progressRef.current = d?.state?.progress || {};
                 const saved = d?.state?.queue || [];
                 if (saved.length) {
                   player.setQueue(saved);
                   // 默认停在列表第一项：卡片直接显示它，点播放键即可开始。
-                  player.setIndex(0);
-                  if (saved[0]) player.setCurrent(saved[0]);
+                  const savedIndex=Math.max(0,Math.min(Number(d?.state?.queueIndex)||0,saved.length-1));
+                  player.setIndex(savedIndex);
+                  player.setCurrent(saved[savedIndex]);
                 }
                 // 恢复上次的倍速与音量
                 const savedRate = Number(d?.state?.rate);
@@ -2020,10 +2144,7 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
             if (!hydratedRef.current) return undefined;
             const timer = setTimeout(() => {
               call('saveQueue', {
-                queue: player.queue.map((e) => ({
-                  eid: e.eid, pid: e.pid, title: e.title, podcastTitle: e.podcastTitle,
-                  image: e.image, duration: e.duration,
-                })),
+                queue: player.queue.map(queueEpisode),
                 index: player.index,
               }).catch(() => {});
             }, 600);
@@ -2050,7 +2171,8 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
             }),
             h(UpdateBanner,{updates,onOpen:()=>{setNotesOpen(false);setOpen(true);setTab('settings');setNavigationRevision(v=>v+1)}}),
             h('div',{className:'xyz-content',hidden:notesOpen},open ? h(Panel, { player, updates,navigationRevision, initialTab: tab, onClose: () => window.mygo.call('Backend.Hide') }) : null),
-            notesOpen ? h(EpisodeNotes,{episode:notesEpisode,onClose:()=>setNotesOpen(false)}) : null,
+            notesOpen ? h(EpisodeNotes,{player,episode:notesEpisode,onClose:()=>setNotesOpen(false),onShare:()=>setShareSnapshot({episode:notesEpisode,position:notesEpisode?.eid===player.current?.eid?player.position:null})}) : null,
+            shareSnapshot?h(ShareDialog,{...shareSnapshot,onClose:()=>setShareSnapshot(null)}):null,
           );
         }
 
@@ -2059,17 +2181,24 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
 // Original DSH component stylesheet above is preserved verbatim. The host supplies
 // All surfaces follow macOS appearance through WKWebView prefers-color-scheme.
 const hostStyle=document.createElement('style');hostStyle.textContent=`
-:root{color-scheme:light dark;--app-bg:#f8f8fa;--app-fg:#24252b;--app-selected:#e2e4e9;--app-hover:#eceef1;--app-border:#d7d9df;--app-track:#d4d7dd;--app-link:#9a5300;--app-focus:#777b85;--app-scroll:#b7bac2;--app-play:#292b32;--app-play-ink:#fff;--dsw-alias-bg-overlay:var(--app-bg);--dsw-alias-label-primary:var(--app-fg);--dsw-alias-brand-primary:var(--app-fg);--dsw-alias-bg-base:var(--app-bg);--dsw-alias-border-l1:var(--app-border);--dsw-alias-border-l2:var(--app-border)}
-@media(prefers-color-scheme:dark){:root{--app-bg:#25262b;--app-fg:#eeeff2;--app-selected:#3b3d45;--app-hover:#303239;--app-border:#3d3f47;--app-track:#50535d;--app-link:#ffbd77;--app-focus:#a9afbd;--app-scroll:#646976;--app-play:#f1f2f5;--app-play-ink:#24262c}}
+:root{color-scheme:light dark;--app-share:#087f73;--app-share-ink:#fff;--app-share-hover:#066b61;--app-bg:#f8f8fa;--app-fg:#24252b;--app-selected:#e2e4e9;--app-hover:#eceef1;--app-border:#d7d9df;--app-track:#d4d7dd;--app-link:#9a5300;--app-focus:#777b85;--app-scroll:#b7bac2;--app-play:#292b32;--app-play-ink:#fff;--dsw-alias-bg-overlay:var(--app-bg);--dsw-alias-label-primary:var(--app-fg);--dsw-alias-brand-primary:var(--app-fg);--dsw-alias-bg-base:var(--app-bg);--dsw-alias-border-l1:var(--app-border);--dsw-alias-border-l2:var(--app-border)}
+@media(prefers-color-scheme:dark){:root{--app-share:#63d8c5;--app-share-ink:#102e29;--app-share-hover:#80e4d4;--app-bg:#25262b;--app-fg:#eeeff2;--app-selected:#3b3d45;--app-hover:#303239;--app-border:#3d3f47;--app-track:#50535d;--app-link:#ffbd77;--app-focus:#a9afbd;--app-scroll:#646976;--app-play:#f1f2f5;--app-play-ink:#24262c}}
 
 .xyz-panel-body.xyz-feed-body{display:flex;flex-direction:column;overflow:hidden}
+.xyz-share-backdrop{position:fixed;inset:0;z-index:2147483500;background:#0007;display:flex;align-items:center;justify-content:center;padding:16px}
+.xyz-share-dialog{width:100%;max-width:440px;max-height:100%;overflow:auto;background:var(--app-bg);color:var(--app-fg);border:1px solid var(--app-border);border-radius:14px;padding:18px;display:flex;flex-direction:column;gap:16px;box-shadow:0 12px 40px #0004;font-size:13px}
+.xyz-share-head{display:flex;align-items:center;justify-content:space-between;gap:10px}.xyz-share-head button{font-size:22px}
+.xyz-share-title{font-size:12px;line-height:1.6;opacity:.65;overflow-wrap:anywhere}
+.xyz-share-options{display:grid;grid-template-columns:1fr 1fr;gap:10px}.xyz-share-options button{background:var(--app-hover);border:1px solid var(--app-border);padding:18px 10px}
+.xyz-share-timing{display:flex;gap:8px;flex-wrap:wrap}.xyz-share-timing button{padding:8px 10px;background:var(--app-hover)}.xyz-share-timing button[aria-pressed="true"]{background:var(--app-play);color:var(--app-play-ink)}
+.xyz-share-card{display:block;width:100%;height:min(43vh,320px);object-fit:contain;border-radius:8px}.xyz-share-actions{display:flex;gap:10px;justify-content:flex-end}.xyz-share-actions button{padding:8px 12px}.xyz-share-back{align-self:flex-start}.xyz-share-dialog>.xyz-btn.primary{padding:10px}.xyz-share-dialog button:focus-visible{outline:2px solid var(--app-focus);outline-offset:3px}
 .xyz-episode-updates{display:flex;flex-direction:column;gap:12px;flex:1;min-height:0}
 .xyz-episode-updates>*{flex-shrink:0}
 .xyz-episode-updates>.xyz-list{flex:1;min-height:0;overflow-y:auto}
-.xyz-feed-heading{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:4px 0 2px}
-.xyz-feed-title{font-size:14px;font-weight:600;margin-bottom:5px}
-.xyz-subscriptions-entry{font-size:11px;white-space:nowrap;opacity:.65}
-.xyz-feed-item{position:relative;padding-bottom:16px;border-bottom:1px solid var(--app-border)}
+.xyz-settings-page{display:flex;flex-direction:column;gap:12px;padding:2px 0 12px}.xyz-settings-page>.xyz-section{padding:13px 14px;border:1px solid var(--app-border);border-radius:10px;gap:10px;background:color-mix(in srgb,var(--app-hover) 35%,var(--app-bg))}.xyz-settings-page>.xyz-section>.xyz-section-title{opacity:.75;font-size:11px;letter-spacing:0;margin-bottom:2px}.xyz-settings-page .xyz-setting-row{min-height:44px;gap:12px}.xyz-settings-page .xyz-setting-name{font-size:12px;line-height:1.5}.xyz-settings-page .xyz-setting-desc{font-size:11px;line-height:1.5;opacity:.6}.xyz-settings-page .xyz-hint{font-size:11px;line-height:1.6}.xyz-settings-page .xyz-btn{font-size:11px;line-height:18px;padding:4px 9px;white-space:nowrap;flex-shrink:0;border:1px solid var(--app-border);background:var(--app-hover);font-weight:500}.xyz-settings-page .xyz-btn:hover{background:var(--app-selected)}.xyz-settings-page .xyz-btn.primary{background:var(--app-play);color:var(--app-play-ink)}.xyz-settings-page .xyz-seg{flex-wrap:wrap;justify-content:flex-end}.xyz-settings-page .xyz-seg-item{padding:3px 5px}.xyz-backup-settings{display:flex;flex-direction:column}.xyz-backup-settings>.xyz-setting-row{border-top:1px solid var(--app-border);padding-top:10px;margin-top:10px}.xyz-backup-confirm{margin-top:10px;padding:10px;background:var(--app-hover);border-radius:7px}.xyz-settings-page .xyz-account{padding-bottom:2px}.xyz-sleep-trigger.active{background:var(--app-selected);color:var(--app-share)}.xyz-sleep-panel{position:fixed;z-index:2147483400;width:270px;max-height:calc(100vh - 24px);overflow:auto;padding:14px;background:var(--app-bg);color:var(--app-fg);border:1px solid var(--app-border);border-radius:12px;box-shadow:0 8px 28px #0004;font-size:12px;display:flex;flex-direction:column;gap:12px}.xyz-sleep-heading{display:flex;align-items:center;justify-content:space-between;gap:8px}.xyz-sleep-panel button,.xyz-sleep-custom input{font:inherit;border:1px solid var(--app-border);background:var(--app-hover);color:var(--app-fg);border-radius:6px;padding:6px;cursor:pointer}.xyz-sleep-panel button:hover{background:var(--app-selected)}.xyz-sleep-panel :focus-visible{outline:2px solid var(--app-focus);outline-offset:2px}.xyz-sleep-presets{display:flex;gap:5px}.xyz-sleep-presets button{flex:1;white-space:nowrap;font-size:11px}.xyz-sleep-custom{display:flex;align-items:center;gap:7px}.xyz-sleep-custom input{width:0;min-width:0;flex:1;cursor:text}.xyz-sleep-custom button{padding:6px 12px}.xyz-sleep-end{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-top:1px solid var(--app-border);cursor:pointer}.xyz-sleep-end input{accent-color:var(--app-share);cursor:pointer}.xyz-full-title{position:fixed;z-index:2147483450;pointer-events:none;padding:8px 10px;border:1px solid var(--app-border);border-radius:7px;background:var(--app-bg);color:var(--app-fg);box-shadow:0 4px 16px #0003;font-size:12px;font-weight:500;line-height:1.6;white-space:normal;overflow-wrap:anywhere}.xyz-queue-menu{position:fixed;z-index:2147483400;width:150px;padding:5px;background:var(--app-bg);color:var(--app-fg);border:1px solid var(--app-border);border-radius:9px;box-shadow:0 6px 24px #0003}.xyz-queue-menu>button{display:flex;align-items:center;gap:9px;width:100%;padding:9px 8px;border:0;border-radius:5px;background:transparent;color:inherit;font:inherit;font-size:12px;cursor:pointer;text-align:left}.xyz-queue-menu>button:hover,.xyz-queue-menu>button:focus-visible{background:var(--app-hover);outline:none}.xyz-notes-actions{display:flex;align-items:center;gap:3px;flex-shrink:0}.xyz-notes-actions>button{display:flex;align-items:center;justify-content:center;width:27px;height:30px;padding:0;border:0;border-radius:6px;background:transparent;color:var(--app-fg);cursor:pointer}.xyz-notes-actions>button:hover{background:var(--app-hover)}.xyz-notes-actions>button:focus-visible{outline:2px solid var(--app-focus)}.xyz-feed-heading{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:4px 0 2px}
+.xyz-feed-title{display:flex;align-items:center;gap:7px;font-size:14px;font-weight:600}.xyz-feed-count{font-size:10px;font-weight:500;line-height:18px;min-width:18px;padding:0 5px;border-radius:9px;text-align:center;background:var(--app-selected);color:var(--app-fg)}.xyz-feed-toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;padding-bottom:12px;border-bottom:1px solid var(--app-border)}.xyz-feed-status{font-size:11px;min-width:0}.xyz-feed-actions{display:flex;align-items:center;gap:6px;flex-shrink:0}.xyz-feed-actions>.xyz-btn{font-size:11px;line-height:18px;padding:4px 9px;white-space:nowrap}.xyz-feed-actions>.xyz-feed-check{background:var(--app-hover);border:1px solid var(--app-border)}.xyz-feed-actions>.xyz-feed-check:hover{background:var(--app-selected)}.xyz-feed-actions>.xyz-feed-add{background:var(--app-play);color:var(--app-play-ink)}
+.xyz-subscriptions-entry{font-size:11px;white-space:nowrap;opacity:.7;padding:4px 0 4px 8px}.xyz-subscriptions-entry:hover{opacity:1}
+.xyz-episode-updates select{font:inherit;font-size:11px;color:var(--app-fg);background:var(--app-hover);border:1px solid var(--app-border);border-radius:6px;padding:5px;min-width:0;max-width:100%}.xyz-episode-updates input[type="checkbox"]{accent-color:var(--app-share)}.xyz-feed-item{position:relative;padding-bottom:16px;border-bottom:1px solid var(--app-border)}
 .xyz-feed-ignore{position:absolute;right:6px;bottom:2px;font-size:10px;opacity:.45}
 .xyz-feed-footnote{margin-top:auto;padding-top:8px;font-size:10px;line-height:1.6;text-align:right;opacity:.4}
 .xyz-tabs{min-width:0;overflow-x:auto}.xyz-tab{flex-shrink:0}
@@ -2084,11 +2213,11 @@ const hostStyle=document.createElement('style');hostStyle.textContent=`
 *{box-sizing:border-box}body{margin:0;padding:0;background:var(--app-bg);color:var(--app-fg);font-family:system-ui,-apple-system,sans-serif}#root{height:100vh;display:flex;flex-direction:column;gap:0}
 .xyz-card-wrap{padding:0;flex-shrink:0;order:1}.xyz-panel{position:relative!important;inset:auto!important;width:100%!important;max-width:none!important;height:auto!important;max-height:none!important;min-height:0!important;flex:1;order:2;box-shadow:none}.xyz-resize{display:none!important}
 .xyz-panel{border:none;border-radius:0;background:var(--app-bg)}.xyz-panel-head{padding:10px 16px}.xyz-panel-body{padding-left:16px;padding-right:16px}.xyz-row-active,.xyz-tab[data-active="true"]{background:var(--app-selected)}.xyz-row-active .xyz-row-t{color:var(--app-fg)}.xyz-row:not(.xyz-row-active):hover{background:var(--app-hover)}
-.xyz-card{background:var(--app-bg);border:none;border-radius:0;padding:14px 16px;gap:9px;border-bottom:1px solid var(--app-border)}.xyz-cover{border-radius:7px}.xyz-seek{background:var(--app-track)}.xyz-seek>i{background:var(--app-fg)}.xyz-icon-btn.accent{background:var(--app-play);color:var(--app-play-ink)}
+.xyz-card{background:var(--app-bg);border:none;border-radius:0;padding:14px 16px;gap:9px;border-bottom:1px solid var(--app-border)}.xyz-cover{border-radius:7px}.xyz-seek{background:transparent}.xyz-seek-track{background:var(--app-track)}.xyz-seek-track>i{background:var(--app-fg)}.xyz-icon-btn.accent{background:var(--app-play);color:var(--app-play-ink)}
 .xyz-seek:focus{outline:none!important}.xyz-seek:focus-visible{outline:1px solid var(--app-focus)!important;outline-offset:3px}.xyz-panel button:focus-visible{outline:1px solid var(--app-focus);outline-offset:2px}
 .xyz-card-foot{position:relative;display:flex;justify-content:space-between;min-height:38px;gap:4px}.xyz-card-foot>.xyz-tnum{justify-self:start}.xyz-controls{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);gap:14px}.xyz-controls-aux{justify-self:end;display:flex;align-items:center;gap:2px}.xyz-jump{width:32px;height:32px}.xyz-controls .xyz-icon-btn.accent{width:36px;height:36px;border-radius:50%;margin:0 3px}
-.xyz-content{display:flex;flex-direction:column;flex:1;min-height:0;order:2}.xyz-content[hidden]{display:none}.xyz-notes{order:2;flex:1;min-height:0;overflow:auto;background:var(--app-bg);color:var(--app-fg);border-top:1px solid var(--app-border)}.xyz-notes-original{padding:20px 22px;font-size:14px;line-height:1.85;overflow-wrap:anywhere}.xyz-notes-original p{margin:0 0 18px}.xyz-notes-original h1,.xyz-notes-original h2,.xyz-notes-original h3{font-size:16px;line-height:1.6;margin:22px 0 12px}.xyz-notes-original img{max-width:100%;height:auto}.xyz-notes-original a{color:var(--app-link);text-decoration:underline;text-underline-offset:3px}.xyz-notes-original ul,.xyz-notes-original ol{padding-left:22px}.xyz-notes-original li{margin-bottom:12px}.xyz-notes-original blockquote{margin:12px 0;padding-left:12px;border-left:3px solid var(--app-border)}.xyz-notes-message{padding:24px;font-size:13px}.xyz-card-top:focus-visible{outline:1px solid var(--app-focus);outline-offset:2px}
-.xyz-episode-play,.xyz-queue-play{flex:0 0 auto;width:28px;height:28px}.xyz-notes-head{position:sticky;top:0;display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--app-bg);border-bottom:1px solid var(--app-border);z-index:1}.xyz-notes-title{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.xyz-row-action:hover{background:var(--app-play);color:var(--app-play-ink)}
+.xyz-content{display:flex;flex-direction:column;flex:1;min-height:0;order:2}.xyz-content[hidden]{display:none}.xyz-notes{order:2;flex:1;min-height:0;overflow:auto;background:var(--app-bg);color:var(--app-fg);border-top:1px solid var(--app-border)}.xyz-notes-original{padding:20px 22px;font-size:14px;line-height:1.85;overflow-wrap:anywhere}.xyz-notes-original p{margin:0 0 18px}.xyz-notes-original h1,.xyz-notes-original h2,.xyz-notes-original h3{font-size:16px;line-height:1.6;margin:22px 0 12px}.xyz-notes-original img{max-width:100%;height:auto}.xyz-notes-original a{color:var(--app-link);text-decoration:underline;text-underline-offset:3px;cursor:pointer;border-radius:3px}.xyz-notes-original a:hover{background:var(--app-hover);text-decoration-thickness:2px}.xyz-notes-original a:focus-visible{outline:2px solid var(--app-focus);outline-offset:3px}.xyz-notes-original ul,.xyz-notes-original ol{padding-left:22px}.xyz-notes-original li{margin-bottom:12px}.xyz-notes-original blockquote{margin:12px 0;padding-left:12px;border-left:3px solid var(--app-border)}.xyz-notes-message{padding:24px;font-size:13px}.xyz-card-top:focus-visible{outline:1px solid var(--app-focus);outline-offset:2px}
+.xyz-episode-play,.xyz-queue-play{flex:0 0 auto;width:28px;height:28px}.xyz-notes-head{position:sticky;top:0;display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--app-bg);border-bottom:1px solid var(--app-border);z-index:1}.xyz-notes-head>.xyz-btn{flex:0 0 auto;white-space:nowrap;height:30px;padding:0 10px;border:1px solid var(--app-border);background:var(--app-hover);color:var(--app-fg);font-weight:600;display:inline-flex;align-items:center;justify-content:center}.xyz-notes-head>.xyz-btn:hover{background:var(--app-selected)}.xyz-notes-head>.xyz-notes-share{background:var(--app-share);color:var(--app-share-ink);border-color:transparent;padding:0 12px;gap:5px}.xyz-notes-head>.xyz-notes-share:hover{background:var(--app-share-hover)}.xyz-notes-head>.xyz-btn:active{transform:translateY(1px)}.xyz-notes-head>.xyz-btn:focus-visible{outline:2px solid var(--app-focus);outline-offset:2px}.xyz-notes-title{flex:1;min-width:0;font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.xyz-row-action:hover{background:var(--app-play);color:var(--app-play-ink)}
 .xyz-qr-login{display:flex;flex-direction:column;align-items:center;gap:12px;padding:14px 0}.xyz-qr-code{width:248px;height:248px;padding:12px;display:grid;place-items:center;background:white;color:#24252b;border-radius:12px}.xyz-qr-code img{display:block;width:224px;height:224px}.xyz-qr-status{text-align:center;font-size:12px;line-height:1.6}.xyz-qr-actions{display:flex;gap:14px;align-items:center}.xyz-login-advanced{font-size:11px;opacity:.7;margin-top:8px}.xyz-login-advanced summary{cursor:pointer;margin-bottom:8px}.xyz-login-advanced textarea{margin-bottom:8px}
 ::-webkit-scrollbar{width:5px}::-webkit-scrollbar-thumb{background:var(--app-scroll);border-radius:4px}
 `;document.head.append(hostStyle);
