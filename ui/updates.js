@@ -114,7 +114,7 @@ export function UpdateSettings({updates, player}) {
       ? ['下载更新',updates.download,'下载更新']
       : failure
         ? ['重试',error?updates.refresh:status.availableVersion?updates.download:updates.check,'重试更新']
-        : [status.phase==='checking'?'检查中…':status.phase==='downloading'?'下载中…':'检查更新',updates.check,'检查更新'];
+        : [status.phase==='checking'?'检查中…':status.phase==='downloading'?'下载中…':'重新检查',updates.check,'重新检查'];
   const subtitle = failure ? '' : ({current:'已是最新版本',checking:'正在检查新版本…',available:`可更新至 ${status.availableVersion}`,downloading:`正在获取 ${status.availableVersion||'新版本'}`,ready:'更新已就绪，重启后安装',disabled:status.message||'当前无法在线更新'}[status.phase]||'保持应用为最新版本');
   const divider={borderTop:'1px solid var(--app-border)',paddingTop:10};
   return h('section', {className:'xyz-section','aria-label':'软件更新'},
@@ -124,7 +124,9 @@ export function UpdateSettings({updates, player}) {
         h('div',{style:{display:'flex',flexDirection:'column',gap:4,minWidth:0}},
           h('div',{style:{fontSize:13,fontWeight:600}},`版本 ${status.version||'读取中…'}`),
           subtitle?h('div',{style:{fontSize:11,opacity:.6}},subtitle):null),
-        h('button',{type:'button',className:'xyz-btn',title:action[2],disabled:working||status.phase==='disabled',onClick:action[1],style:{flexShrink:0,border:'1px solid var(--app-border)',padding:'5px 10px'}},action[0])),
+        h('div',{style:{display:'flex',alignItems:'center',justifyContent:'flex-end',flexWrap:'wrap',gap:8,flexShrink:0}},
+          (status.phase==='available'||status.phase==='ready'||failure)?h('button',{type:'button',className:'xyz-btn','aria-label':'重新检查',title:status.phase==='ready'?'更新已就绪，请先安装':'重新获取最新版本',disabled:working||status.phase==='disabled'||status.phase==='ready',onClick:updates.check,style:{fontSize:11,opacity:.75,padding:'5px 0'}},'重新检查'):null,
+          h('button',{type:'button',className:'xyz-btn',title:action[2],disabled:working||status.phase==='disabled',onClick:action[1],style:{flexShrink:0,border:'1px solid var(--app-border)',padding:'5px 10px'}},action[0]))),
       status.notes&&status.availableVersion?h('details',{style:{fontSize:11,...divider}},
         h('summary',{style:{cursor:'pointer',opacity:.7}},'更新说明'),
         h('div',{style:{whiteSpace:'pre-wrap',overflowWrap:'anywhere',lineHeight:1.7,opacity:.75,paddingTop:8}},status.notes)):null,
