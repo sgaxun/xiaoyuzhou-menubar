@@ -200,7 +200,7 @@ func (s *Service) cached(key, kind string, force bool, load func() (any, error))
 	s.cache[key] = object{"value": value, "at": time.Now().UnixMilli()}
 	prefix := ""
 	limit := 0
-	for p, n := range map[string]int{"podcast:": 20, "episode:": 30, "search:": 10, "notes:": 20} {
+	for p, n := range map[string]int{"podcast:": 20, "episode:": 30, "search:": 10, "notes:": 20, "transcript:": 10, "transcript-v2:": 10} {
 		if len(key) >= len(p) && key[:len(p)] == p {
 			prefix = p
 			limit = n

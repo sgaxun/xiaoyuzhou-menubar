@@ -71,34 +71,29 @@ export function BackupSettings({player}) {
 }
 
 export function SleepTimer({player}) {
-  const [open,setOpen]=useState(null),[minutes,setMinutes]=useState('30'),[error,setError]=useState('');
+  const [open,setOpen]=useState(null);
   const anchor=useRef(null),panel=useRef(null);
   const active=player.sleepMode!=='off';
   const label=player.sleepMode==='end'?'播完本期暂停':active?`剩余 ${time(player.sleepRemaining)}`:'未开启';
   const close=()=>{setOpen(null);anchor.current?.focus({preventScroll:true})};
   useEffect(()=>{
     if(!open)return;
-    panel.current?.querySelector('input')?.focus({preventScroll:true});
+    panel.current?.querySelector('button')?.focus({preventScroll:true});
     const outside=e=>{if(!anchor.current?.contains(e.target)&&!panel.current?.contains(e.target))setOpen(null)};
     const hide=()=>setOpen(null);
     document.addEventListener('pointerdown',outside,true);window.addEventListener('resize',hide);
     return()=>{document.removeEventListener('pointerdown',outside,true);window.removeEventListener('resize',hide)};
   },[open]);
-  const start=value=>{
-    const n=Number(value);
-    if(!Number.isFinite(n)||n<=0||!Number.isSafeInteger(Math.round(Date.now()+n*60000))||Date.now()+n*60000>8640000000000000){setError('请输入有效的分钟数');return}
-    player.setSleepMode(String(n));setError('');close();
-  };
+  const start=minutes=>{player.setSleepMode(String(minutes));close()};
   return h(React.Fragment,null,
-    h('button',{ref:anchor,type:'button',className:`xyz-icon-btn xyz-sleep-trigger${active?' active':''}`,title:`睡眠定时 · ${label}`,'aria-label':`睡眠定时 · ${label}`,'aria-expanded':!!open,'aria-haspopup':'dialog',onClick:()=>{if(open){close();return}const r=anchor.current.getBoundingClientRect();setError('');setOpen({left:Math.max(8,Math.min(r.right-270,window.innerWidth-278)),top:r.bottom+8})}},
+    h('button',{ref:anchor,type:'button',className:`xyz-icon-btn xyz-sleep-trigger${active?' active':''}`,title:`睡眠定时 · ${label}`,'aria-label':`睡眠定时 · ${label}`,'aria-expanded':!!open,'aria-haspopup':'dialog',onClick:()=>{if(open){close();return}const r=anchor.current.getBoundingClientRect();setOpen({left:Math.max(8,Math.min(r.right-270,window.innerWidth-278)),top:r.bottom+8})}},
       h('svg',{width:15,height:15,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:1.8,strokeLinecap:'round',strokeLinejoin:'round','aria-hidden':true},h('path',{d:'M20.8 13A9 9 0 0 1 11 3.2 9 9 0 1 0 20.8 13Z'}))),
     open?createPortal(h('section',{ref:panel,className:'xyz-sleep-panel',role:'dialog','aria-label':'睡眠定时',style:open,onKeyDown:e=>{e.stopPropagation();if(e.key==='Escape'){e.preventDefault();close()}if(e.key==='Tab'){const items=[...panel.current.querySelectorAll('button,input')].filter(el=>!el.disabled);const i=items.indexOf(document.activeElement);if(e.shiftKey&&i===0){e.preventDefault();items.at(-1)?.focus()}else if(!e.shiftKey&&i===items.length-1){e.preventDefault();items[0]?.focus()}}}},
       h('div',{className:'xyz-sleep-heading'},h('strong',null,'睡眠定时'),h('span',{className:'xyz-hint',role:'status'},label)),
       h('div',{className:'xyz-sleep-presets'},...[15,30,60,90].map(n=>h('button',{key:n,type:'button',onClick:()=>start(n)},`${n} 分钟`))),
-      h('form',{className:'xyz-sleep-custom',onSubmit:e=>{e.preventDefault();start(minutes)}},h('input',{type:'number',step:'any',min:'0.01',value:minutes,'aria-label':'自定义分钟数',onChange:e=>setMinutes(e.target.value)}),h('span',null,'分钟'),h('button',{type:'submit'},'开始')),
-      h('label',{className:'xyz-sleep-end'},h('span',null,'播完当前这期暂停'),h('input',{type:'checkbox',role:'switch',checked:player.sleepMode==='end',disabled:!player.current,onChange:e=>{player.setSleepMode(e.target.checked?'end':'off');setError('')}})),
+      h('label',{className:'xyz-sleep-end'},h('span',null,'播完当前这期暂停'),h('input',{type:'checkbox',role:'switch',checked:player.sleepMode==='end',disabled:!player.current,onChange:e=>{player.setSleepMode(e.target.checked?'end':'off')}})),
       active?h('button',{type:'button',className:'xyz-sleep-cancel',onClick:()=>{player.setSleepMode('off');close()}},'关闭定时'):null,
-      error?h('div',{role:'alert',className:'xyz-hint'},error):null),document.body):null);
+      ),document.body):null);
 }
 
 export function EpisodeActions({episode, player}) {

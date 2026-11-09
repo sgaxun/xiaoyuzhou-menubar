@@ -394,6 +394,20 @@ func (s *Service) dispatch(ctx context.Context, action string, q url.Values, bod
 			}
 		}
 		return object{"ok": true, "episodes": hits}, nil
+	case "transcript":
+		eid := q.Get("eid")
+		if !podcast.IsValidID(eid) {
+			return nil, errors.New("单集 ID 无效")
+		}
+		v, err := s.cached("transcript-v2:"+eid, "transcript", force, func() (any, error) {
+			return s.withToken(ctx, func(token string) (any, error) {
+				return s.client.GetTranscript(ctx, token, eid)
+			})
+		})
+		if err != nil {
+			return nil, err
+		}
+		return merged(v), nil
 	case "episode", "shownotes", "audioUrl":
 		eid := q.Get("eid")
 		key := "episode:" + eid

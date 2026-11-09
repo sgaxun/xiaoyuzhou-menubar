@@ -1,8 +1,10 @@
 import React from 'react';
+import {PodcastContext,PodcastLink} from './podcast-link.js';
 import {PodcastDetails} from './podcast-details.js';
 import {CoverPreview, openCover} from './cover-preview.js';
 import {queueEpisode,episodeImage,episodePodcast} from './episode.js';
 import {SeekBar} from './seek-bar.js';
+import {Transcript} from './transcript.js';
 import {FullTitle} from './full-title.js';
 import {QueueAdd} from './queue-add.js';
 import {BackupSettings, SleepTimer, EpisodeActions} from './listening-tools.js';
@@ -815,6 +817,7 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
       const { player, onOpen, wide, onTitleToggle, notesOpen } = props;
       const { current, playing, position, duration, error } = player;
       const total = duration || current?.duration || 0;
+      const remaining = Math.max(0, total - (Number(position) || 0));
       // 收起成窄栏：一个图标按钮即可。
       if (!wide) {
         return h(
@@ -844,21 +847,21 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
         // 封面 + 文本
         h(
           'div',
-          { className: 'xyz-card-top', onClick: onTitleToggle, role:'button',tabIndex:0,'aria-label':'切换节目介绍','aria-expanded':!!notesOpen,onKeyDown:e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();onTitleToggle()}},title: notesOpen ? '收起 shownotes' : '查看 shownotes' },
+          { className: 'xyz-card-top' },
           current
             ? h('img', { className: 'xyz-cover', src: imageOf(episodeImage(current)), alt: '' })
             : h('div', { className: 'xyz-cover empty' }, IconMic(18)),
           h(
             'div',
             { className: 'xyz-card-text' },
-            h(FullTitle,{className:'xyz-card-title',text:current?current.title:'小宇宙播客'}),
+            h('button',{type:'button',className:'xyz-card-title-link',onClick:onTitleToggle,'aria-label':'切换节目介绍','aria-expanded':!!notesOpen,title:notesOpen?'收起单集介绍':'查看单集介绍'},h(FullTitle,{as:'span',className:'xyz-card-title',text:current?current.title:'小宇宙播客'})),
             h(
               'div',
               { className: error ? 'xyz-card-sub err' : 'xyz-card-sub' },
-              error ? error : ['loading','buffering'].includes(player.playStatus) ? (player.playStatus==='loading'?'正在加载音频…':'正在缓冲…') : current ? episodePodcast(current) || '正在播放' : '点开选择节目',
+              error ? error : current ? h(PodcastLink,{episode:current}) : '点开选择节目',
             ),
           ),
-          current ? h('span', {className:'xyz-card-duration', 'aria-label':`总时长 ${total > 0 ? mmss(total) : '未知'}`, title:'总时长'}, total > 0 ? mmss(total) : '--:--') : null,
+          current ? h('span', {className:'xyz-card-duration', 'aria-label':`剩余时间 ${total > 0 ? mmss(remaining) : '未知'}`, title:'剩余时间'}, total > 0 ? mmss(remaining) : '--:--') : null,
         ),
 
         error ? h('button',{className:'xyz-btn',onClick:player.retry},'重试播放') : null,
@@ -935,7 +938,7 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
           'div',
           { className: 'xyz-row-main', style: { cursor: 'pointer' } },
           h(FullTitle, {className:'xyz-row-t',text:ep.title}),
-          h('div', { className: 'xyz-row-s' }, sub),
+          h('div', { className: 'xyz-row-s' },h(PodcastLink,{episode:ep}),episodePodcast(ep)?(sub.startsWith(episodePodcast(ep))?sub.slice(episodePodcast(ep).length):sub?` · ${sub}`:''):sub),
         ),
         h('button',{className:'xyz-icon-btn xyz-episode-play',title:'播放这期节目',onClick:e=>{e.stopPropagation();playIt()}},IconPlay(14)),
         h(QueueAdd,{episode:ep,player,disabled:!!addDisabled,onAdd}),
@@ -980,7 +983,7 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
     }
 
     function Panel(props) {
-      const { player, onClose, initialTab, updates, navigationRevision } = props;
+      const { player, onClose, initialTab, updates, navigationRevision, podcastTarget } = props;
       const showNotes=React.useContext(NotesContext);
       const [tab, setTab] = useState(initialTab || 'queue');
       useEffect(()=>setTab(initialTab||'queue'),[initialTab,navigationRevision]);
@@ -993,6 +996,23 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
       const [subs, setSubs] = useState([]);
       const [showSubscriptions, setShowSubscriptions] = useState(false);
       const [detail, setDetail] = useState(null);
+      const openPodcast=React.useContext(PodcastContext);
+      const returnTab=useRef('queue');
+      const [podcastLoading,setPodcastLoading]=useState(false);
+      useEffect(()=>{
+        if(!podcastTarget)return;
+        let alive=true;
+        if(tab!=='detail')returnTab.current=tab;
+        setTab('detail');setDetail(null);setMessage('');setPodcastLoading(true);
+        (async()=>{
+          let pid=podcastTarget.subscriptionPid||podcastTarget.pid;
+          if(!pid&&podcastTarget.eid){const data=await call(`episode?eid=${encodeURIComponent(podcastTarget.eid)}`);pid=data.episode?.pid;}
+          if(!pid)throw new Error('暂时无法找到这个节目');
+          const data=await call('open',{input:`https://www.xiaoyuzhoufm.com/podcast/${pid}`});
+          if(alive)setDetail({podcast:data.podcast,episodes:data.episodes||[]});
+        })().catch(error=>{if(alive)setMessage(error.message)}).finally(()=>{if(alive)setPodcastLoading(false)});
+        return()=>{alive=false};
+      },[podcastTarget]);
       const [cacheAt, setCacheAt] = useState(0);
       const [subQuery, setSubQuery] = useState('');
       const [searchResult, setSearchResult] = useState(null); // { episodes, podcasts }
@@ -1274,8 +1294,12 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
           },
           message ? h('div', { className: tab === 'settings' ? 'xyz-hint' : 'xyz-err', style: { marginBottom: 8 } }, message) : null,
 
+          tab === 'detail' && !detail
+            ? h('div',null,h('button',{className:'xyz-btn',onClick:()=>setTab(returnTab.current)},'‹ 返回'),podcastLoading?h('div',{className:'xyz-hint',role:'status',style:{padding:'16px 0'}},'正在加载节目…'):null)
+            : null,
+
           tab === 'detail' && detail
-            ? h(PodcastDetails, {detail, player, EpisodeRow, onBack: () => setTab('subs')})
+            ? h(PodcastDetails, {detail, player, EpisodeRow, onBack: () => setTab(returnTab.current)})
             : null,
 
           tab === 'subs' && !showSubscriptions
@@ -1375,20 +1399,9 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
                           {
                             className: 'xyz-row-main',
                             style: { cursor: 'pointer' },
-                            onClick: async () => {
-                              setLoading(true);
-                              try {
-                                const data = await call('open', { input: `https://www.xiaoyuzhoufm.com/podcast/${p.pid}` });
-                                setDetail({ podcast: data.podcast, episodes: data.episodes || [] });
-                                setTab('detail');
-                              } catch (err) {
-                                setMessage(err.message);
-                              } finally {
-                                setLoading(false);
-                              }
-                            },
+                            onClick: () => openPodcast(p),
                           },
-                          h('div', { className: 'xyz-row-t' }, p.title),
+                          h('div', { className: 'xyz-row-t' }, h(PodcastLink,{episode:p},p.title)),
                           h(
                             'div',
                             { className: 'xyz-row-s' },
@@ -1574,10 +1587,10 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
                           (() => {
                             const pos = Number(state?.progress?.[ep.eid]?.position) || 0;
                             const total = Number(ep.duration) || 0;
-                            const parts = [episodePodcast(ep)];
+                            const parts = [];
                             if (pos >= 5) parts.push(`上次听到 ${mmss(pos)}`);
                             else if (total) parts.push(mmss(total));
-                            return parts.filter(Boolean).join(' · ');
+                            return h(React.Fragment,null,h(PodcastLink,{episode:ep}),parts.length?` · ${parts.join(' · ')}`:'');
                           })(),
                         ),
                       ),
@@ -1975,6 +1988,7 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
     }
 
     function EpisodeNotes({episode,onClose,onShare,player}) {
+      const [view,setView]=useState('notes');
       const [data,setData]=useState(null),[error,setError]=useState('');
       const eid=episode?.eid;
       useEffect(()=>{
@@ -2011,8 +2025,13 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
           if(player.current?.eid===eid)player.seek(seconds);else{player.setIndex(player.queue.findIndex(ep=>ep.eid===eid));player.play(episode,seconds)}return;}
         try{const href=new URL(raw,`https://www.xiaoyuzhoufm.com/episode/${eid}`).href;window.mygo.call('Backend.OpenLink',href).catch(err=>setError(err.message))}catch{setError('链接无法打开')}
       };
-      return h('section',{className:'xyz-notes',role:'region','aria-label':'本期 shownotes'},
+      return h('section',{className:'xyz-notes',style:view==='transcript'?{display:'flex',flexDirection:'column',overflow:'hidden'}:undefined,role:'region','aria-label':'本期节目介绍与字幕'},
         h('div',{className:'xyz-notes-head'},h('button',{className:'xyz-btn',onClick:onClose,title:'返回之前的页面'},'‹ 返回'),h(EpisodeActions,{episode,player}),h(FullTitle,{as:'span',className:'xyz-notes-title',text:episode?.title||'节目介绍'}),episode?.eid?h('button',{type:'button',className:'xyz-btn xyz-notes-share',style:{marginLeft:'auto',flexShrink:0},onClick:onShare},h('svg',{width:14,height:14,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:1.8,strokeLinecap:'round',strokeLinejoin:'round','aria-hidden':true,focusable:'false'},h('path',{d:'M12 15V3m-4 4 4-4 4 4M7 10H5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-9a1 1 0 0 0-1-1h-2'})),'分享'):null),
+        h('div',{className:'xyz-notes-tabs','aria-label':'内容切换'},
+          h('button',{type:'button','aria-pressed':view==='notes',onClick:()=>setView('notes')},'节目介绍'),
+          h('button',{type:'button','aria-pressed':view==='transcript',onClick:()=>setView('transcript')},'字幕')),
+        h('style',null,'.xyz-notes-tabs{display:flex;gap:8px;padding:8px 14px;border-bottom:1px solid var(--app-border)}.xyz-notes-tabs button{font:inherit;font-size:12px;padding:6px 12px;border:1px solid var(--app-border);border-radius:6px;background:var(--app-hover);color:var(--app-fg);cursor:pointer}.xyz-notes-tabs button[aria-pressed=true]{background:var(--app-selected);border-color:var(--app-focus)}.xyz-notes-tabs button:focus-visible{outline:2px solid var(--app-focus);outline-offset:2px}'),
+        view==='transcript'?h(Transcript,{key:eid,episode,player,call}):
         !eid?h('div',{className:'xyz-empty'},'先选择一集节目'):
         error?h('div',{className:'xyz-notes-message'},error):
         !data?h('div',{className:'xyz-notes-message'},'正在加载 shownotes…'):
@@ -2031,6 +2050,8 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
           const [notesOpen,setNotesOpen]=useState(false);
           const [notesEpisode,setNotesEpisode]=useState(null);
           const [shareSnapshot,setShareSnapshot]=useState(null);
+          const [podcastTarget,setPodcastTarget]=useState(null);
+          const showPodcast=episode=>{setNotesOpen(false);setOpen(true);setPodcastTarget({...episode})};
           const showEpisodeNotes=ep=>{setNotesEpisode(ep);setNotesOpen(true)};
           playerRef.current = player;
 
@@ -2040,7 +2061,7 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
             mountedListeners.forEach((fn) => fn(true));
             const listener = () => {
               setOpen((value) => {
-                if (!value) setTab('queue');
+                if (!value) {setTab('queue');setPodcastTarget(null);}
                 return !value;
               });
             };
@@ -2124,7 +2145,7 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
             return () => clearTimeout(timer);
           }, [player.queue, player.index]);
 
-          return h(
+          return h(PodcastContext.Provider,{value:showPodcast},h(
             NotesContext.Provider,
             {value:showEpisodeNotes},
             // audio 元素放在最外层：它不随卡片/窄栏切换而重建，
@@ -2136,17 +2157,18 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
               notesOpen,
               onTitleToggle:()=>{if(notesOpen&&notesEpisode?.eid===player.current?.eid)setNotesOpen(false);else showEpisodeNotes(player.current)},
               onOpen: () => {
+                setPodcastTarget(null);
                 setNotesOpen(false);
                 setOpen(true);
                 setTab('queue');
                 setNavigationRevision(v=>v+1);
               },
             }),
-            h(UpdateBanner,{updates,onOpen:()=>{setNotesOpen(false);setOpen(true);setTab('settings');setNavigationRevision(v=>v+1)}}),
-            h('div',{className:'xyz-content',hidden:notesOpen},open ? h(Panel, { player, updates,navigationRevision, initialTab: tab, onClose: () => window.mygo.call('Backend.Hide') }) : null),
+            h(UpdateBanner,{updates,onOpen:()=>{setPodcastTarget(null);setNotesOpen(false);setOpen(true);setTab('settings');setNavigationRevision(v=>v+1)}}),
+            h('div',{className:'xyz-content',hidden:notesOpen},open ? h(Panel, { player, updates,navigationRevision, podcastTarget, initialTab: tab, onClose: () => window.mygo.call('Backend.Hide') }) : null),
             notesOpen ? h(EpisodeNotes,{player,episode:notesEpisode,onClose:()=>setNotesOpen(false),onShare:()=>setShareSnapshot({episode:notesEpisode,position:notesEpisode?.eid===player.current?.eid?player.position:null})}) : null,
             shareSnapshot?h(ShareDialog,{...shareSnapshot,onClose:()=>setShareSnapshot(null)}):null,
-          );
+          ));
         }
 
 
@@ -2199,3 +2221,7 @@ createRoot(document.getElementById('root')).render(React.createElement(React.Fra
 const podcastStyle = document.createElement('style');
 podcastStyle.textContent = `.xyz-podcast-details{display:flex;flex-direction:column;gap:16px;min-height:0}.xyz-podcast-heading{display:flex;gap:16px;align-items:center}.xyz-podcast-heading h2{font-size:18px;line-height:1.4;margin:0 0 6px;overflow-wrap:anywhere}.xyz-podcast-cover{padding:0;border:0;background:transparent;flex-shrink:0;cursor:zoom-in;border-radius:12px}.xyz-podcast-cover img{display:block;width:88px;height:88px;object-fit:cover;border-radius:12px}.xyz-podcast-cover:focus-visible{outline:2px solid var(--app-focus);outline-offset:4px}.xyz-podcast-brief{font-size:12px;line-height:1.6;margin-top:6px;opacity:.8}.xyz-podcast-tabs{display:flex;gap:20px;border-bottom:1px solid var(--app-border)}.xyz-podcast-tabs button{padding:8px 0 10px;background:none;border:0;border-bottom:2px solid transparent;color:var(--app-fg);opacity:.6;cursor:pointer;font:inherit;font-size:13px}.xyz-podcast-tabs button[aria-selected=true]{border-bottom-color:var(--app-share);color:var(--app-share);opacity:1;font-weight:600}.xyz-podcast-description{white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px;line-height:1.85;padding:0 0 20px}.xyz-podcast-description p{margin:0 0 12px}.xyz-podcast-description a{color:var(--app-link)}`;
 document.head.append(podcastStyle);
+
+const podcastLinkStyle=document.createElement('style');
+podcastLinkStyle.textContent=`.xyz-podcast-link{display:inline;max-width:100%;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom;white-space:nowrap;padding:0;border:0;background:none;color:inherit;font:inherit;line-height:inherit;text-align:left;cursor:pointer}.xyz-podcast-link:hover{color:var(--app-share);text-decoration:underline;text-underline-offset:3px}.xyz-podcast-link:focus-visible{outline:2px solid var(--app-focus);outline-offset:2px;border-radius:2px}.xyz-card-title-link{display:block;width:100%;min-width:0;padding:0;border:0;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer}.xyz-card-title-link .xyz-card-title{display:block}.xyz-card-title-link:focus-visible{outline:2px solid var(--app-focus);outline-offset:2px;border-radius:2px}`;
+document.head.append(podcastLinkStyle);

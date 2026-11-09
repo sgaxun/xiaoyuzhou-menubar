@@ -297,6 +297,10 @@ func (c *Client) GetPodcast(ctx context.Context, pid string) (Map, error) {
 	return Map{"podcast": pc, "episodes": eps}, nil
 }
 func (c *Client) api(ctx context.Context, path, token, method string, body Map) (any, error) {
+	return c.apiWithHeaders(ctx, path, token, method, body, nil)
+}
+
+func (c *Client) apiWithHeaders(ctx context.Context, path, token, method string, body Map, headers map[string]string) (any, error) {
 	if token == "" {
 		return nil, fmt.Errorf("未登录")
 	}
@@ -320,6 +324,9 @@ func (c *Client) api(ctx context.Context, path, token, method string, body Map) 
 	r.Header.Set("x-jike-access-token", token)
 	r.Header.Set("Local-Time", time.Now().UTC().Format("2006-01-02T15:04:05.000")+"+08:00")
 	r.Header.Set("Timezone", "Asia/Shanghai")
+	for key, value := range headers {
+		r.Header.Set(key, value)
+	}
 	resp, e := c.do(r, false)
 	if e != nil {
 		return nil, e
