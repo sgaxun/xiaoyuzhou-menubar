@@ -105,7 +105,7 @@ export function UpdateSettings({updates, player}) {
   const [linkError,setLinkError]=useState('');
   const openRepository=async()=>{
     setLinkError('');
-    try{await window.mygo.call('Backend.OpenLink','https://github.com/sgaxun/xiaoyuzhou-menubar')}
+    try{await window.mygo.call('Backend.OpenLink','https://github.com/sgaxun/xiaoyuzhou-player')}
     catch{setLinkError('仓库链接未能打开，请重试。')}
   };
   const action = status.phase==='ready'

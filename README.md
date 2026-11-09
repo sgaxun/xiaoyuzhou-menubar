@@ -6,7 +6,7 @@ macOS 菜单栏播客播放器。在菜单栏听小宇宙，收起窗口后继�
 
 ## 安装与开始使用
 
-1. 在 [Releases](https://github.com/sgaxun/xiaoyuzhou-menubar/releases) 下载最新版本的 DMG。
+1. 在 [Releases](https://github.com/sgaxun/xiaoyuzhou-player/releases) 下载最新版本的 DMG。
 2. 打开 DMG，将「小宇宙播放器」拖入「应用程序」并启动。
 3. 点击菜单栏图标，在「设置」中使用手机小宇宙 App 扫码登录。
 4. 进入「订阅 → 全部订阅」，点击「拉取订阅」，同步关注的节目。

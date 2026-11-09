@@ -1,6 +1,12 @@
 # 版本发布与更新签名
 
-发布目标为 `sgaxun/xiaoyuzhou-menubar`。发布脚本生成并校验安装包和签名更新包，上传操作仅创建或更新 GitHub Release 草稿，正式发布需在 GitHub 确认。
+发布目标为 `sgaxun/xiaoyuzhou-player`。发布脚本生成并校验安装包和签名更新包，上传操作仅创建或更新 GitHub Release 草稿，正式发布需在 GitHub 确认。
+
+## 旧版客户端兼容
+
+仓库由 `sgaxun/xiaoyuzhou-menubar` 更名为 `sgaxun/xiaoyuzhou-player`。已发布的旧版客户端仍使用原更新地址，通过 GitHub 重定向获取 Releases 和更新包；新构建使用当前仓库地址。
+
+不要重新创建同账号下的 `xiaoyuzhou-menubar` 仓库，否则旧地址的重定向会失效。保留应用标识、公钥和本地数据目录；无需重签历史更新包，也不要修改历史 manifest 中的归档地址。
 
 ## 一次性准备
 
