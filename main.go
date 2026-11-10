@@ -28,6 +28,11 @@ type Backend struct {
 	tray               *mygo.Tray
 	mediaMu            sync.Mutex
 	nativeShareDialogs atomic.Int32
+	subtitle           string
+	subtitleOffset     int
+	subtitleToggle     *mygo.MenuItem
+	pinned             atomic.Bool
+	pinToggle          *mygo.MenuItem
 	title              string
 	quitting           bool
 }
@@ -38,6 +43,17 @@ func (b *Backend) Request(action string, body any) (any, error) {
 }
 
 func (b *Backend) Hide() { b.win.Hide() }
+
+func (b *Backend) Pinned() bool { return b.pinned.Load() }
+func (b *Backend) SetPinned(pinned bool) bool {
+	b.pinned.Store(pinned)
+	b.win.SetAlwaysOnTop(pinned)
+	if b.pinToggle != nil {
+		b.pinToggle.SetChecked(pinned)
+	}
+	go b.win.Page().Eval(fmt.Sprintf("window.dispatchEvent(new CustomEvent('xyz-pin-changed',{detail:%t}))", pinned))
+	return pinned
+}
 
 func (b *Backend) OpenLink(link string) error {
 	u, err := url.Parse(link)
@@ -65,6 +81,44 @@ func (b *Backend) MediaState(title, artist string, playing bool, position, durat
 	mygo.NowPlaying.SetPlayback(state, time.Duration(position*float64(time.Second)))
 }
 
+// MenuSubtitle follows the audio clock, including seeks and pauses.
+func (b *Backend) MenuSubtitle(text string, progress float64) error {
+	b.mediaMu.Lock()
+	defer b.mediaMu.Unlock()
+	if b.tray == nil {
+		return nil
+	}
+	if text == "" {
+		if b.subtitle != "" {
+			b.tray.SetTitle("")
+			if err := b.tray.SetIcon(trayIcon(), true); err != nil {
+				return err
+			}
+			b.subtitle = ""
+			b.subtitleOffset = 0
+		}
+		return nil
+	}
+	frame, offset, err := subtitleFrame(text, progress)
+	if err != nil {
+		return err
+	}
+	if b.subtitle == text && b.subtitleOffset == offset {
+		return nil
+	}
+	if err = b.tray.SetIcon(frame, true); err != nil {
+		return err
+	}
+	b.subtitle = text
+	b.subtitleOffset = offset
+	return nil
+}
+func (b *Backend) MenuSubtitleEnabled(enabled bool) {
+	if b.subtitleToggle != nil {
+		b.subtitleToggle.SetChecked(enabled)
+	}
+}
+
 func (b *Backend) show() {
 	anchor := b.tray.Bounds()
 	bounds := b.win.Bounds()
@@ -88,9 +142,9 @@ func (b *Backend) ready() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	b.win = mygo.NewWindow(mygo.WindowOptions{Title: "小宇宙播放器", Width: 460, Height: 620, Hidden: true, Frameless: true, DisableResize: true, DisableMinimize: true, DisableMaximize: true, DisableFullScreen: true, AlwaysOnTop: true, SkipTaskbar: true, Page: mygo.PageOptions{Autoplay: mygo.AutoplayAllow, BackgroundThrottling: mygo.ThrottlingOff}})
+	b.win = mygo.NewWindow(mygo.WindowOptions{Title: "小宇宙播放器", Width: 460, Height: 620, Hidden: true, Frameless: true, DisableResize: true, DisableMinimize: true, DisableMaximize: true, DisableFullScreen: true, AlwaysOnTop: false, SkipTaskbar: true, Page: mygo.PageOptions{Autoplay: mygo.AutoplayAllow, BackgroundThrottling: mygo.ThrottlingOff}})
 	b.win.OnBlur(func() {
-		if b.nativeShareDialogs.Load() == 0 {
+		if !b.pinned.Load() && b.nativeShareDialogs.Load() == 0 {
 			b.win.Hide()
 		}
 	})
@@ -109,13 +163,26 @@ func (b *Backend) ready() {
 	b.win.Page().OnDidFinishLoad(func() { firstLoad.Do(b.show) })
 	b.win.Page().LoadHTML(page, "")
 	b.tray.OnClick(b.toggle)
+	b.subtitleToggle = &mygo.MenuItem{Label: "菜单栏显示字幕", Type: mygo.MenuItemCheckbox, Checked: false, Click: func(*mygo.MenuItem, *mygo.Window) {
+		go b.win.Page().Eval("window.dispatchEvent(new Event('xyz-toggle-menubar-transcript'))")
+	}}
+	b.pinToggle = &mygo.MenuItem{Label: "置顶窗口", Type: mygo.MenuItemCheckbox, Click: func(item *mygo.MenuItem, _ *mygo.Window) { b.SetPinned(item.IsChecked()) }}
 	menu := mygo.NewMenu([]*mygo.MenuItem{
 		{Label: "打开播放器", Click: func(*mygo.MenuItem, *mygo.Window) { b.show() }},
 		{Label: "播放 / 暂停", Click: func(*mygo.MenuItem, *mygo.Window) { go b.win.Page().Eval("window.menuPlayer?.play()") }},
 		{Label: "下一集", Click: func(*mygo.MenuItem, *mygo.Window) { go b.win.Page().Eval("window.menuPlayer?.next()") }},
+		b.pinToggle,
+		b.subtitleToggle,
 		mygo.Separator(), {Label: "退出小宇宙播放器", Role: mygo.RoleQuit},
 	})
-	b.tray.OnRightClick(func() { b.win.Hide(); b.tray.SetMenu(menu); defer b.tray.SetMenu(nil); b.tray.PopUpMenu() })
+	b.tray.OnRightClick(func() {
+		if !b.pinned.Load() {
+			b.win.Hide()
+		}
+		b.tray.SetMenu(menu)
+		defer b.tray.SetMenu(nil)
+		b.tray.PopUpMenu()
+	})
 	mygo.NowPlaying.OnCommand(func(cmd mygo.MediaCommand, pos time.Duration) {
 		js := ""
 		switch cmd {

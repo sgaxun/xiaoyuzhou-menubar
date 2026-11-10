@@ -6,6 +6,8 @@ import {queueEpisode,episodeImage,episodePodcast} from './episode.js';
 import {SeekBar} from './seek-bar.js';
 import {Transcript} from './transcript.js';
 import {Comments} from './comments.js';
+import {PinWindow} from './pin-window.js';
+import {MenubarTranscript,MenubarTranscriptSettings} from './menubar-transcript.js';
 import {FullTitle} from './full-title.js';
 import {QueueAdd} from './queue-add.js';
 import {BackupSettings, SleepTimer, EpisodeActions} from './listening-tools.js';
@@ -862,6 +864,7 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
               error ? error : current ? h(PodcastLink,{episode:current}) : '点开选择节目',
             ),
           ),
+          h(PinWindow),
           current ? h('span', {className:'xyz-card-duration', 'aria-label':`剩余时间 ${total > 0 ? mmss(remaining) : '未知'}`, title:'剩余时间'}, total > 0 ? mmss(remaining) : '--:--') : null,
         ),
 
@@ -1909,6 +1912,7 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
                   'div',
                   { className: 'xyz-section' },
                   h('div', { className: 'xyz-section-title' }, '播放'),
+                  h(MenubarTranscriptSettings),
                   h(
                     'div',
                     { className: 'xyz-setting-row' },
@@ -2154,6 +2158,7 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
             // audio 元素放在最外层：它不随卡片/窄栏切换而重建，
             // 否则 play() 拿到的会是已被卸载的旧元素，seek 全部无效。
             h('audio', { ref: player.audioRef, preload: 'auto' }),
+            h(MenubarTranscript,{player,call}),
             h(PlayerBar, {
               player,
               wide,
