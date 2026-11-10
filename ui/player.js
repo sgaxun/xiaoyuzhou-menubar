@@ -5,6 +5,7 @@ import {CoverPreview, openCover} from './cover-preview.js';
 import {queueEpisode,episodeImage,episodePodcast} from './episode.js';
 import {SeekBar} from './seek-bar.js';
 import {Transcript} from './transcript.js';
+import {Comments} from './comments.js';
 import {FullTitle} from './full-title.js';
 import {QueueAdd} from './queue-add.js';
 import {BackupSettings, SleepTimer, EpisodeActions} from './listening-tools.js';
@@ -2025,12 +2026,14 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
           if(player.current?.eid===eid)player.seek(seconds);else{player.setIndex(player.queue.findIndex(ep=>ep.eid===eid));player.play(episode,seconds)}return;}
         try{const href=new URL(raw,`https://www.xiaoyuzhoufm.com/episode/${eid}`).href;window.mygo.call('Backend.OpenLink',href).catch(err=>setError(err.message))}catch{setError('链接无法打开')}
       };
-      return h('section',{className:'xyz-notes',style:view==='transcript'?{display:'flex',flexDirection:'column',overflow:'hidden'}:undefined,role:'region','aria-label':'本期节目介绍与字幕'},
+      return h('section',{className:'xyz-notes',style:view!=='notes'?{display:'flex',flexDirection:'column',overflow:'hidden'}:undefined,role:'region','aria-label':'本期节目介绍、字幕与评论'},
         h('div',{className:'xyz-notes-head'},h('button',{className:'xyz-btn',onClick:onClose,title:'返回之前的页面'},'‹ 返回'),h(EpisodeActions,{episode,player}),h(FullTitle,{as:'span',className:'xyz-notes-title',text:episode?.title||'节目介绍'}),episode?.eid?h('button',{type:'button',className:'xyz-btn xyz-notes-share',style:{marginLeft:'auto',flexShrink:0},onClick:onShare},h('svg',{width:14,height:14,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:1.8,strokeLinecap:'round',strokeLinejoin:'round','aria-hidden':true,focusable:'false'},h('path',{d:'M12 15V3m-4 4 4-4 4 4M7 10H5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-9a1 1 0 0 0-1-1h-2'})),'分享'):null),
         h('div',{className:'xyz-notes-tabs','aria-label':'内容切换'},
           h('button',{type:'button','aria-pressed':view==='notes',onClick:()=>setView('notes')},'节目介绍'),
-          h('button',{type:'button','aria-pressed':view==='transcript',onClick:()=>setView('transcript')},'字幕')),
+          h('button',{type:'button','aria-pressed':view==='transcript',onClick:()=>setView('transcript')},'字幕'),
+          h('button',{type:'button','aria-pressed':view==='comments',onClick:()=>setView('comments')},'评论')),
         h('style',null,'.xyz-notes-tabs{display:flex;gap:8px;padding:8px 14px;border-bottom:1px solid var(--app-border)}.xyz-notes-tabs button{font:inherit;font-size:12px;padding:6px 12px;border:1px solid var(--app-border);border-radius:6px;background:var(--app-hover);color:var(--app-fg);cursor:pointer}.xyz-notes-tabs button[aria-pressed=true]{background:var(--app-selected);border-color:var(--app-focus)}.xyz-notes-tabs button:focus-visible{outline:2px solid var(--app-focus);outline-offset:2px}'),
+        view==='comments'?h(Comments,{key:eid,episode,player,call}):
         view==='transcript'?h(Transcript,{key:eid,episode,player,call}):
         !eid?h('div',{className:'xyz-empty'},'先选择一集节目'):
         error?h('div',{className:'xyz-notes-message'},error):
@@ -2166,7 +2169,7 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
             }),
             h(UpdateBanner,{updates,onOpen:()=>{setPodcastTarget(null);setNotesOpen(false);setOpen(true);setTab('settings');setNavigationRevision(v=>v+1)}}),
             h('div',{className:'xyz-content',hidden:notesOpen},open ? h(Panel, { player, updates,navigationRevision, podcastTarget, initialTab: tab, onClose: () => window.mygo.call('Backend.Hide') }) : null),
-            notesOpen ? h(EpisodeNotes,{player,episode:notesEpisode,onClose:()=>setNotesOpen(false),onShare:()=>setShareSnapshot({episode:notesEpisode,position:notesEpisode?.eid===player.current?.eid?player.position:null})}) : null,
+            notesOpen ? h(EpisodeNotes,{key:notesEpisode?.eid,player,episode:notesEpisode,onClose:()=>setNotesOpen(false),onShare:()=>setShareSnapshot({episode:notesEpisode,position:notesEpisode?.eid===player.current?.eid?player.position:null})}) : null,
             shareSnapshot?h(ShareDialog,{...shareSnapshot,onClose:()=>setShareSnapshot(null)}):null,
           ));
         }

@@ -394,6 +394,14 @@ func (s *Service) dispatch(ctx context.Context, action string, q url.Values, bod
 			}
 		}
 		return object{"ok": true, "episodes": hits}, nil
+	case "comments":
+		v, err := s.withToken(ctx, func(token string) (any, error) {
+			return s.client.ListComments(ctx, token, str(body["eid"]), str(body["thread"]), body["loadMoreKey"], str(body["order"]))
+		})
+		if err != nil {
+			return nil, err
+		}
+		return merged(v), nil
 	case "transcript":
 		eid := q.Get("eid")
 		if !podcast.IsValidID(eid) {
