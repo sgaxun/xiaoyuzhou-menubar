@@ -15,7 +15,7 @@ npm test
 npm run package
 ```
 
-`npm test` 编译界面并运行 Go 测试，测试使用隔离的临时目录及模拟网络。需要额外覆盖并发访问时，可运行 `go test -race ./...`。
+`npm test` 编译界面，运行 Node 组件／字幕调度测试和 Go 测试；测试使用模拟音频、隔离的临时目录及模拟网络。需要额外覆盖并发访问时，可运行 `go test -race ./...`。
 
 `npm run package` 生成应用图标、编译界面和 macOS 原生分享助手、构建并临时签名 App，最后生成和校验 DMG。分享助手源文件位于 `native/share.swift`，使用 Xcode Command Line Tools 编译，产物不提交到仓库。
 

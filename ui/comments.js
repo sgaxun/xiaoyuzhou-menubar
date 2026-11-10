@@ -1,8 +1,9 @@
 import React from 'react';
-const {createElement:h,useEffect,useRef,useState}=React;
+const {createElement:h,useEffect,useLayoutEffect,useRef,useState}=React;
 const styles=`
-.xyz-comments{min-height:0;flex:1;overflow:auto;padding:12px 20px 24px;overscroll-behavior:contain;user-select:text;-webkit-user-select:text}
-.xyz-comments-sort{display:flex;gap:18px;padding:0 0 12px;border-bottom:1px solid var(--app-border)}
+.xyz-comments{min-height:0;flex:1;display:flex;flex-direction:column;overflow:hidden;padding:12px 20px 0;overscroll-behavior:contain;user-select:text;-webkit-user-select:text}
+.xyz-comments-page{min-height:0;flex:1;overflow:auto;overscroll-behavior:contain;padding-bottom:24px}
+.xyz-comments-sort{flex-shrink:0;display:flex;gap:18px;padding:0 0 12px;border-bottom:1px solid var(--app-border)}
 .xyz-comments-sort button{background:none;border:0;padding:4px 0;color:var(--app-fg);opacity:.5;font:inherit;font-size:14px;cursor:pointer}
 .xyz-comments-sort button[aria-pressed=true]{color:var(--app-share);opacity:1}
 .xyz-comments-summary{font-size:12px;opacity:.6;margin:0 0 8px}
@@ -19,9 +20,10 @@ const styles=`
 .xyz-comments-error{font-size:12px;color:var(--app-fg);padding:8px 0}
 `;
 const merge=(a,b)=>[...new Map([...a,...b].map(c=>[c.id,c])).values()];
-function Page({eid,thread='',order='HOT',call,render}) {
+function Page({eid,thread='',order='HOT',active=true,call,render}) {
  const [rows,setRows]=useState([]),[cursor,setCursor]=useState(null),[busy,setBusy]=useState(false),[error,setError]=useState(''),[loaded,setLoaded]=useState(false);
- const alive=useRef(false),pending=useRef(false);
+ const alive=useRef(false),pending=useRef(false),container=useRef(null),scroll=useRef(0);
+ useLayoutEffect(()=>{if(active&&container.current)container.current.scrollTop=scroll.current},[active]);
  const load=async(key=null)=>{
   if(pending.current)return;pending.current=true;setBusy(true);setError('');
   try{const result=await call('comments',{eid,thread,order,loadMoreKey:key});
@@ -31,7 +33,7 @@ function Page({eid,thread='',order='HOT',call,render}) {
   finally{pending.current=false;if(alive.current)setBusy(false)}
  };
  useEffect(()=>{alive.current=true;load();return()=>{alive.current=false}},[]);
- return h(React.Fragment,null,
+ return h('div',{ref:container,className:thread?undefined:'xyz-comments-page',style:active?undefined:{display:'none'},onScroll:()=>{if(active&&container.current)scroll.current=container.current.scrollTop}},
   !thread&&loaded?h('p',{className:'xyz-comments-summary'},`已加载 ${rows.length} 条主评论${cursor?' · '+({HOT:'按热门排序',TIME:'最新优先',TIMESTAMP:'按播放时点排序'}[order]):' · 已全部加载'}`):null,
   rows.map(render),
   error?h('div',{className:'xyz-comments-error',role:'alert'},error):null,
@@ -40,7 +42,7 @@ function Page({eid,thread='',order='HOT',call,render}) {
   loaded&&!rows.length?h('p',{className:'xyz-comments-summary'},thread?'还没有回复':'这期节目还没有评论'):null);
 }
 function Comment({comment:c,episode,player,call,reply=false}) {
- const [expanded,setExpanded]=useState(false),[seekError,setSeekError]=useState('');
+ const [expanded,setExpanded]=useState(false),[opened,setOpened]=useState(false),[seekError,setSeekError]=useState('');
  const text=String(c.text||'');
  const parts=text.split(/((?<![\d:])(?:\d{1,2}:)?\d{1,3}:[0-5]\d(?![\d:]))/g);
  const seek=stamp=>{
@@ -60,15 +62,15 @@ function Comment({comment:c,episode,player,call,reply=false}) {
   h('p',{className:'xyz-comment-text'},reply&&c.replyToComment?.author?.nickname?`回复 ${c.replyToComment.author.nickname}：`:null,
    ...parts.map((part,i)=>i%2?h('button',{key:i,type:'button',className:'xyz-comment-time',onClick:()=>seek(part),'aria-label':`跳转到 ${part}`},part):part)),
   seekError?h('div',{role:'alert',className:'xyz-comments-error'},seekError):null,
-  !reply&&count>0?h('button',{type:'button',className:'xyz-btn','aria-expanded':expanded,onClick:()=>setExpanded(v=>!v)},expanded?'收起回复':`查看 ${count} 条回复`):null,
-  expanded?h('div',{className:'xyz-comment-replies'},h(Page,{eid:episode.eid,thread:c.id,call,render:r=>h(Comment,{key:r.id,comment:r,episode,player,call,reply:true})})):null);
+  !reply&&count>0?h('button',{type:'button',className:'xyz-btn','aria-expanded':expanded,onClick:()=>{setOpened(true);setExpanded(v=>!v)}},expanded?'收起回复':`查看 ${count} 条回复`):null,
+  opened?h('div',{className:'xyz-comment-replies',hidden:!expanded},h(Page,{eid:episode.eid,thread:c.id,active:expanded,call,render:r=>h(Comment,{key:r.id,comment:r,episode,player,call,reply:true})})):null);
 }
-// Mounted only by an explicit click on the comments tab; no background fetching.
-export function Comments({episode,player,call}) {
- const [order,setOrder]=useState('HOT');
- const container=useRef(null);
- const changeOrder=value=>{setOrder(value);if(container.current)container.current.scrollTop=0};
- return h('section',{ref:container,className:'xyz-comments','aria-label':'单集评论'},h('style',null,styles),
+// Lazy-mounted on first entry; visited sorts and replies remain in memory only
+// for this episode view. Hidden pages never initiate additional requests.
+export function Comments({episode,player,call,active=true}) {
+ const [order,setOrder]=useState('HOT'),[visited,setVisited]=useState(['HOT']);
+ const changeOrder=value=>{setVisited(values=>values.includes(value)?values:[...values,value]);setOrder(value)};
+ return h('section',{className:'xyz-comments',style:active?undefined:{display:'none'},'aria-label':'单集评论'},h('style',null,styles),
   h('div',{className:'xyz-comments-sort','aria-label':'评论排序'},...[['HOT','全部'],['TIME','最新'],['TIMESTAMP','时点']].map(([value,label])=>h('button',{key:value,type:'button','aria-pressed':order===value,onClick:()=>changeOrder(value)},label))),
-  episode?.eid?h(Page,{key:episode.eid+order,eid:episode.eid,order,call,render:c=>h(Comment,{key:c.id,comment:c,episode,player,call})}):h('p',null,'先选择一集节目'));
+  episode?.eid?visited.map(value=>h(Page,{key:episode.eid+value,eid:episode.eid,order:value,active:active&&order===value,call,render:c=>h(Comment,{key:c.id,comment:c,episode,player,call})})):h('p',null,'先选择一集节目'));
 }

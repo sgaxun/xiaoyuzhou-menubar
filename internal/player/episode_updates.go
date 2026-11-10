@@ -70,6 +70,35 @@ func (s *Service) queueSubscriptionSource(ep object) object {
 	return ep
 }
 
+// Old history dropped source fields. Recover only from the same episode's
+// explicit queue source, or the existing unambiguous local subscription evidence.
+func (s *Service) historySubscriptionSource(ep object) object {
+	if str(ep["subscriptionPid"]) != "" {
+		return s.queueSubscriptionSource(ep)
+	}
+	var source object
+	for _, v := range list(s.state["queue"]) {
+		queued := obj(v)
+		if str(queued["eid"]) != str(ep["eid"]) || str(queued["subscriptionPid"]) == "" {
+			continue
+		}
+		if source != nil && str(source["subscriptionPid"]) != str(queued["subscriptionPid"]) {
+			return ep
+		}
+		source = queued
+	}
+	if source != nil {
+		out := clone(ep)
+		for _, k := range []string{"subscriptionPid", "subscriptionTitle", "subscriptionImage", "isCoCreated"} {
+			if v, ok := source[k]; ok {
+				out[k] = v
+			}
+		}
+		return s.queueSubscriptionSource(out)
+	}
+	return s.queueSubscriptionSource(ep)
+}
+
 // Keep canonical episode metadata for playback; source fields describe why the
 // episode appears in this user's subscription feed. Also decorates older caches.
 func subscriptionEpisode(ep, sub object) object {

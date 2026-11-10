@@ -115,6 +115,10 @@ func (s *Service) saveState(next object) error {
 }
 func (s *Service) saveCache() error { return writeJSON(filepath.Join(s.dir, "cache.json"), s.cache) }
 func (s *Service) clearAccountCache() error {
+	s.accountEpoch++
+	for _, cancel := range s.commentCancels {
+		cancel()
+	}
 	if err := s.resetEpisodeUpdates(); err != nil {
 		return err
 	}
@@ -164,6 +168,19 @@ func (s *Service) progress(body object) (object, error) {
 		duration = num(previousItem["duration"])
 	}
 	item["duration"] = duration
+	// Source metadata is one group: do not mix a new source with old labels.
+	source := body
+	if str(source["subscriptionPid"]) == "" {
+		source = previousItem
+	}
+	if str(source["subscriptionPid"]) != "" {
+		for _, k := range []string{"subscriptionPid", "subscriptionTitle", "subscriptionImage", "isCoCreated"} {
+			if v, exists := source[k]; exists {
+				item[k] = v
+			}
+		}
+	}
+	item = s.historySubscriptionSource(item)
 	history = append(history, item)
 	for _, v := range list(next["history"]) {
 		if str(obj(v)["eid"]) != eid && len(history) < 300 {

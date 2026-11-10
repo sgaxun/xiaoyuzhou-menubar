@@ -30,6 +30,7 @@ type Backend struct {
 	nativeShareDialogs atomic.Int32
 	subtitle           string
 	subtitleOffset     int
+	subtitleRenderer   subtitleRenderer
 	subtitleToggle     *mygo.MenuItem
 	pinned             atomic.Bool
 	pinToggle          *mygo.MenuItem
@@ -88,30 +89,10 @@ func (b *Backend) MenuSubtitle(text string, progress float64) error {
 	if b.tray == nil {
 		return nil
 	}
-	if text == "" {
-		if b.subtitle != "" {
-			b.tray.SetTitle("")
-			if err := b.tray.SetIcon(trayIcon(), true); err != nil {
-				return err
-			}
-			b.subtitle = ""
-			b.subtitleOffset = 0
-		}
-		return nil
-	}
-	frame, offset, err := subtitleFrame(text, progress)
-	if err != nil {
-		return err
-	}
-	if b.subtitle == text && b.subtitleOffset == offset {
-		return nil
-	}
-	if err = b.tray.SetIcon(frame, true); err != nil {
-		return err
-	}
-	b.subtitle = text
-	b.subtitleOffset = offset
-	return nil
+	return b.subtitleRenderer.update(text, progress, &b.subtitle, &b.subtitleOffset, func(raw []byte) error {
+		b.tray.SetTitle("")
+		return b.tray.SetIcon(raw, true)
+	})
 }
 func (b *Backend) MenuSubtitleEnabled(enabled bool) {
 	if b.subtitleToggle != nil {

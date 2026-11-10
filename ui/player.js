@@ -374,12 +374,7 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
         if (!forced && now - lastSent.current < 15000) return;
         lastSent.current = now;
         return call('progress', {
-          eid: ep.eid,
-          pid: ep.pid,
-          title: ep.title,
-          podcastTitle: ep.podcastTitle,
-          image: ep.image,
-          duration: ep.duration,
+          ...queueEpisode(ep),
           position: Math.round(pos),
           reset,
         }).catch(() => {});
@@ -1994,6 +1989,7 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
 
     function EpisodeNotes({episode,onClose,onShare,player}) {
       const [view,setView]=useState('notes');
+      const [commentsOpened,setCommentsOpened]=useState(false);
       const [data,setData]=useState(null),[error,setError]=useState('');
       const eid=episode?.eid;
       useEffect(()=>{
@@ -2035,9 +2031,10 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
         h('div',{className:'xyz-notes-tabs','aria-label':'内容切换'},
           h('button',{type:'button','aria-pressed':view==='notes',onClick:()=>setView('notes')},'节目介绍'),
           h('button',{type:'button','aria-pressed':view==='transcript',onClick:()=>setView('transcript')},'字幕'),
-          h('button',{type:'button','aria-pressed':view==='comments',onClick:()=>setView('comments')},'评论')),
+          h('button',{type:'button','aria-pressed':view==='comments',onClick:()=>{setCommentsOpened(true);setView('comments')}},'评论')),
         h('style',null,'.xyz-notes-tabs{display:flex;gap:8px;padding:8px 14px;border-bottom:1px solid var(--app-border)}.xyz-notes-tabs button{font:inherit;font-size:12px;padding:6px 12px;border:1px solid var(--app-border);border-radius:6px;background:var(--app-hover);color:var(--app-fg);cursor:pointer}.xyz-notes-tabs button[aria-pressed=true]{background:var(--app-selected);border-color:var(--app-focus)}.xyz-notes-tabs button:focus-visible{outline:2px solid var(--app-focus);outline-offset:2px}'),
-        view==='comments'?h(Comments,{key:eid,episode,player,call}):
+        commentsOpened?h(Comments,{key:eid,episode,player,call,active:view==='comments'}):null,
+        view==='comments'?null:
         view==='transcript'?h(Transcript,{key:eid,episode,player,call}):
         !eid?h('div',{className:'xyz-empty'},'先选择一集节目'):
         error?h('div',{className:'xyz-notes-message'},error):

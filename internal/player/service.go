@@ -19,6 +19,10 @@ import (
 
 type Service struct {
 	mu               sync.Mutex
+	commentRefreshMu sync.Mutex
+	accountEpoch     uint64
+	commentSeq       uint64
+	commentCancels   map[uint64]context.CancelFunc
 	updateMu         sync.Mutex
 	updateEpoch      uint64
 	updateLast       time.Time
@@ -153,6 +157,8 @@ func (s *Service) Request(action string, body any) (any, error) {
 	}
 	var result any
 	switch u.Path[1:] {
+	case "comments":
+		result, err = s.requestComments(ctx, decoded)
 	case "checkEpisodeUpdates":
 		result, err = s.checkEpisodeUpdates(ctx)
 	case "qrStart":
@@ -242,6 +248,11 @@ func (s *Service) dispatch(ctx context.Context, action string, q url.Values, bod
 			queue = append(queue, s.queueSubscriptionSource(obj(v)))
 		}
 		view["queue"] = queue
+		history := []any{}
+		for _, v := range list(view["history"]) {
+			history = append(history, s.historySubscriptionSource(obj(v)))
+		}
+		view["history"] = history
 		return object{"ok": true, "state": view, "loggedIn": access != ""}, nil
 	case "saveQueue":
 		next := clone(s.state)
@@ -394,14 +405,6 @@ func (s *Service) dispatch(ctx context.Context, action string, q url.Values, bod
 			}
 		}
 		return object{"ok": true, "episodes": hits}, nil
-	case "comments":
-		v, err := s.withToken(ctx, func(token string) (any, error) {
-			return s.client.ListComments(ctx, token, str(body["eid"]), str(body["thread"]), body["loadMoreKey"], str(body["order"]))
-		})
-		if err != nil {
-			return nil, err
-		}
-		return merged(v), nil
 	case "transcript":
 		eid := q.Get("eid")
 		if !podcast.IsValidID(eid) {
