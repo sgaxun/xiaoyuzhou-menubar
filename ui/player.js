@@ -920,8 +920,7 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
       const playIt = () => {
         if (onPlay) onPlay();
         else {
-          player.play(ep);
-          player.setIndex(-1);
+          player.playAt([ep, ...player.queue.filter(item => item.eid !== ep.eid)], 0);
         }
       };
       const sub =
@@ -1651,7 +1650,12 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
                   'div',
                   { className: 'xyz-list' },
                   ...(state?.history || []).slice(0, 100).map((h2, i) => {
-                    return h(EpisodeRow, { key: `hs-${h2.eid}-${i}`, ep: h2, player, });
+                    const active = player.current?.eid === h2.eid;
+                    const position = Math.max(0, Number(active ? player.position : player.progressRef.current?.[h2.eid]?.position ?? state?.progress?.[h2.eid]?.position ?? h2.position) || 0);
+                    const duration = Number(active ? player.duration || h2.duration : h2.duration) || 0;
+                    const progress = duration > 0 && position >= duration ? '已播完' : `已播放 ${mmss(position)}`;
+                    const subtitle = `${episodePodcast(h2)}${duration ? ` · ${mmss(duration)}` : ''} · ${progress}`;
+                    return h(EpisodeRow, { key: `hs-${h2.eid}-${i}`, ep: h2, player, subtitle });
                   }),
                   (state?.history || []).length === 0
                     ? h('div', { className: 'xyz-empty' }, '播放过的节目会出现在这里，可以随时重新加入播放列表')
