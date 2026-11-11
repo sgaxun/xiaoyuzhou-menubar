@@ -2,7 +2,8 @@ import React from 'react';
 import {createSubtitleScheduler,scrollingSubtitle} from './menubar-transcript-scheduler.js';
 const {createElement:h,useEffect,useRef,useState}=React;
 const preference='xyz-menubar-transcript';
-function readEnabled(){try{return localStorage.getItem(preference)==='true'}catch{return false}}
+function readEnabled(){if(typeof window[preference]==='boolean')return window[preference];try{return localStorage.getItem(preference)==='true'}catch{return false}}
+function toggleEnabled(){const next=!readEnabled();window[preference]=next;try{localStorage.setItem(preference,String(next))}catch{/* Embedded pages may deny storage; keep the switch usable for this session. */}window.dispatchEvent(new Event(preference))}
 function useEnabled(){
  const [enabled,setEnabled]=useState(readEnabled);
  useEffect(()=>{const update=()=>setEnabled(readEnabled());window.addEventListener(preference,update);return()=>window.removeEventListener(preference,update)},[]);
@@ -13,7 +14,7 @@ export function MenubarTranscriptSettings(){
  return h('div',{className:'xyz-setting-row'},h('div',{className:'xyz-setting-label'},
   h('div',{className:'xyz-setting-name'},'菜单栏显示字幕'),
   h('div',{className:'xyz-setting-desc'},'固定宽度滚动显示，随播放进度前进和回退')),
-  h('button',{type:'button',className:'xyz-btn','aria-pressed':enabled,onClick:()=>{try{localStorage.setItem(preference,String(!enabled))}catch{return}window.dispatchEvent(new Event(preference))}},enabled?'已开启':'已关闭'));
+  h('button',{type:'button',className:'xyz-btn','aria-pressed':enabled,onClick:toggleEnabled},enabled?'已开启':'已关闭'));
 }
 export {scrollingSubtitle} from './menubar-transcript-scheduler.js';
 export function MenubarTranscript({player,call}){
@@ -42,7 +43,7 @@ export function MenubarTranscript({player,call}){
  },[enabled,eid,started,call]);
  useEffect(()=>{window.mygo.call('Backend.MenuSubtitleEnabled',enabled).catch(()=>{})},[enabled]);
  useEffect(()=>{
-  const toggle=()=>{try{localStorage.setItem(preference,String(!readEnabled()))}catch{return}window.dispatchEvent(new Event(preference))};
+  const toggle=toggleEnabled;
   window.addEventListener('xyz-toggle-menubar-transcript',toggle);
   return()=>{window.removeEventListener('xyz-toggle-menubar-transcript',toggle);window.mygo.call('Backend.MenuSubtitle','',0).catch(()=>{})};
  },[]);

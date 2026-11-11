@@ -18,21 +18,29 @@ import (
 )
 
 type Service struct {
-	mu               sync.Mutex
-	commentRefreshMu sync.Mutex
-	accountEpoch     uint64
-	commentSeq       uint64
-	commentCancels   map[uint64]context.CancelFunc
-	updateMu         sync.Mutex
-	updateEpoch      uint64
-	updateLast       time.Time
-	updateChecking   bool
-	updateAutoCancel context.CancelFunc
-	dir              string
-	state            object
-	cache            object
-	client           *podcast.Client
-	qr               *qrauth.Auth
+	cloudWake          chan struct{}
+	cloudCancel        context.CancelFunc
+	cloudActive        string
+	cloudRunning       bool
+	cloudPlayback      string
+	cloudPlaybackEvent string
+	cloudCancels       map[uint64]context.CancelFunc
+	cloudSeq           uint64
+	mu                 sync.Mutex
+	commentRefreshMu   sync.Mutex
+	accountEpoch       uint64
+	commentSeq         uint64
+	commentCancels     map[uint64]context.CancelFunc
+	updateMu           sync.Mutex
+	updateEpoch        uint64
+	updateLast         time.Time
+	updateChecking     bool
+	updateAutoCancel   context.CancelFunc
+	dir                string
+	state              object
+	cache              object
+	client             *podcast.Client
+	qr                 *qrauth.Auth
 }
 
 func New(dir string) (*Service, error) { return NewWithClient(dir, podcast.NewClient()) }
@@ -157,6 +165,8 @@ func (s *Service) Request(action string, body any) (any, error) {
 	}
 	var result any
 	switch u.Path[1:] {
+	case "pullCloudPlaylist":
+		result, err = s.pullCloudPlaylist(ctx, decoded)
 	case "comments":
 		result, err = s.requestComments(ctx, decoded)
 	case "checkEpisodeUpdates":
@@ -185,6 +195,12 @@ func (s *Service) dispatch(ctx context.Context, action string, q url.Values, bod
 	force := q.Get("refresh") == "1"
 	ok := object{"ok": true}
 	switch action {
+	case "cloudSyncSettings":
+		return s.cloudSyncSettings(body)
+	case "playbackEvent":
+		return s.playbackEvent(body)
+	case "retryCloudSync":
+		return s.retryCloudSync()
 	case "library":
 		library := s.state["library"]
 		if library == nil {
@@ -243,6 +259,7 @@ func (s *Service) dispatch(ctx context.Context, action string, q url.Values, bod
 			return nil, err
 		}
 		view := clone(s.state)
+		view["cloudSync"] = s.cloudSyncView()
 		queue := []any{}
 		for _, v := range list(view["queue"]) {
 			queue = append(queue, s.queueSubscriptionSource(obj(v)))

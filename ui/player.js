@@ -12,6 +12,7 @@ import {FullTitle} from './full-title.js';
 import {QueueAdd} from './queue-add.js';
 import {BackupSettings, SleepTimer, EpisodeActions} from './listening-tools.js';
 import {ShareDialog} from './share.js';
+import {CloudSyncSettings, PullCloudPlaylist, createPlaybackReporter} from './cloud-sync.js';
 import {EpisodeUpdates, EpisodeUpdateSettings} from './episode-updates.js';
 import {useUpdates,UpdateSettings,UpdateBanner} from './updates.js';
 import DOMPurify from 'dompurify';
@@ -291,6 +292,9 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
 
     function usePlayer() {
       const audioRef = useRef(null);
+      const mediaEpisodeRef = useRef(null);
+      const cloudReporter = useRef(null);
+      if (!cloudReporter.current) cloudReporter.current = createPlaybackReporter(call);
       const [current, setCurrent] = useState(null);
       const [queue, setQueue] = useState([]);
       const [index, setIndex] = useState(0);
@@ -300,6 +304,11 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
       const [rate, setRate] = useState(1);
       const [volume, setVolume] = useState(0.8);
       const [error, setError] = useState('');
+      useEffect(() => {
+        const failed = event => setError(`收听同步保存失败：${event.detail}`);
+        window.addEventListener('xyz-cloud-error', failed);
+        return () => window.removeEventListener('xyz-cloud-error', failed);
+      }, []);
       const [library,setLibrary] = useState({bookmarks:{},completed:{},podcastRates:{}});
       const libraryRef=useRef(library), libraryWrites=useRef(Promise.resolve());
       const [playStatus,setPlayStatus]=useState('idle');
@@ -515,6 +524,11 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
           if(requestId!==playRequestRef.current)return;
           const sameEpisode = audio.dataset.xyzEid === episode.eid && audio.readyState > 0;
           if (!sameEpisode) {
+            const previousMedia = mediaEpisodeRef.current;
+            if (previousMedia && previousMedia.eid !== episode.eid && audio.dataset.xyzEid === previousMedia.eid && !audio.ended) {
+              cloudReporter.current('paused', previousMedia, audio.currentTime);
+            }
+            mediaEpisodeRef.current = episode;
             audio.dataset.xyzEid = episode.eid;
             audio.src = url;
             await waitFor('loadedmetadata', 8000);
@@ -668,6 +682,8 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
           applyPendingSeek();
         };
         const onPlay = () => {
+          const ep = mediaEpisodeRef.current;
+          if (ep && audio.dataset.xyzEid === ep.eid) cloudReporter.current('playing', ep, audio.currentTime);
           setPlaying(true);
           const eid = currentRef.current?.eid;
           if (eid) retryRef.current[eid] = 0;
@@ -677,13 +693,16 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
         const onPause = () => {
           setPlayStatus('paused');
           setPlaying(false);
+          const ep = mediaEpisodeRef.current;
+          if (ep && !audio.ended && audio.dataset.xyzEid === ep.eid) cloudReporter.current('paused', ep, audio.currentTime);
           if (currentRef.current && audio.dataset.xyzEid===currentRef.current.eid) sendProgress(currentRef.current, audio.currentTime, true);
         };
         const onEnded = () => {
           setPlaying(false);
           setPlayStatus('paused');
-          const finished = currentRef.current;
+          const finished = mediaEpisodeRef.current || currentRef.current;
           if (finished) {
+            cloudReporter.current('ended', finished, audio.duration || finished.duration || audio.currentTime);
             sendProgress(finished, audio.duration || 0, true);
             // 播完即清理该集缓存（以及不再需要的节目缓存）
             call(`dropCache?eid=${encodeURIComponent(finished.eid)}&pid=${encodeURIComponent(finished.pid || '')}`).catch(() => {});
@@ -775,7 +794,10 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
       useEffect(() => {
         const flush = () => {
           const audio = audioRef.current;
-          if (audio && currentRef.current) sendProgress(currentRef.current, audio.currentTime, true);
+          if (audio && currentRef.current) {
+            sendProgress(currentRef.current, audio.currentTime, true);
+            if (mediaEpisodeRef.current && !audio.ended) cloudReporter.current('paused', mediaEpisodeRef.current, audio.currentTime);
+          }
         };
         window.addEventListener('pagehide', flush);
         return () => window.removeEventListener('pagehide', flush);
@@ -1481,13 +1503,8 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
             ? h(
                 'div',
                 { style: { display: 'flex', flexDirection: 'column', gap: 8 } },
-                h(
-                  'div',
-                  { className: 'xyz-hint' },
-                  player.queue.length
-                    ? `${player.queue.length} 集 · 当前第 ${player.index + 1} 集`
-                    : '播放列表还是空的。到「订阅」里点开一个节目，在单集右侧点 + 单独加入。',
-                ),
+                h(PullCloudPlaylist, {call, player, loggedIn, onUpdated:refreshState}),
+                !player.queue.length ? h('div', {className:'xyz-hint'}, '播放列表还是空的。可拉取云端列表，或到「订阅」中加入单集。') : null,
                 player.queue.length
                   ? h(
                       'div',
@@ -1895,7 +1912,7 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
                   h('div',{className:'xyz-section-title'},'账户'),
                   loggedIn ? h('div',{className:'xyz-account'},
                     state?.user?.avatar?h('img',{className:'xyz-avatar',src:imageOf(state.user.avatar),alt:''}):h('div',{className:'xyz-avatar empty'},IconMic(16)),
-                    h('div',{className:'xyz-account-main'},h('div',{className:'xyz-account-name'},state?.user?.nickname||'已登录'),h('div',{className:'xyz-account-sub'},'播放进度和播放列表保存在本机')),
+                    h('div',{className:'xyz-account-main'},h('div',{className:'xyz-account-name'},state?.user?.nickname||'已登录'),h('div',{className:'xyz-account-sub'},'支持手动拉取云端列表和自动上传收听记录')),
                     h('button',{className:'xyz-btn',onClick:doLogout},'退出')):
                     h('div',{className:'xyz-hint'},'使用手机小宇宙 App 扫码登录，订阅列表需手动拉取。'),
                   qrVisible ? h(QrLogin,{
@@ -1905,6 +1922,8 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
                   !loggedIn?h('details',{className:'xyz-login-advanced'},h('summary',null,'高级设置：手动导入登录态'),
                     h('textarea',{className:'xyz-input',rows:3,placeholder:'粘贴 cookie 或 x-jike-access-token',value:cookie,onChange:e=>setCookie(e.target.value)}),
                     h('button',{className:'xyz-btn',onClick:doLogin,disabled:loading||!cookie.trim()},loading?'导入中…':'导入登录态')):null),
+
+                h(CloudSyncSettings, {call, loggedIn}),
 
                 // —— 播放 ——
                 h(

@@ -69,3 +69,15 @@ test('hook ignores disabled in-flight results and never polls unavailable transc
  await act(async()=>resolve({status:'unavailable'}));assert.equal(f.timers.size,0);
  await f.event('timeupdate');assert.equal(f.fetches.length,2);
 });
+
+test('native toggle works when embedded page storage is denied',async t=>{
+ const f=harness(t,{playing:true});
+ globalThis.localStorage={getItem(){throw new Error('SecurityError')},setItem(){throw new Error('SecurityError')}};
+ await f.mount();
+ await act(async()=>window.dispatchEvent(new Event('xyz-toggle-menubar-transcript')));
+ assert.deepEqual(f.fetches,['transcript?eid=a']);
+ assert.ok(f.calls.some(args=>args[0]==='Backend.MenuSubtitleEnabled'&&args[1]===true));
+ await act(async()=>window.dispatchEvent(new Event('xyz-toggle-menubar-transcript')));
+ assert.equal(f.calls.filter(args=>args[0]==='Backend.MenuSubtitleEnabled').at(-1)[1],false);
+ assert.equal(f.timers.size,0);
+});

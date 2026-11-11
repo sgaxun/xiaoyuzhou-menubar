@@ -116,6 +116,7 @@ func (s *Service) saveState(next object) error {
 func (s *Service) saveCache() error { return writeJSON(filepath.Join(s.dir, "cache.json"), s.cache) }
 func (s *Service) clearAccountCache() error {
 	s.accountEpoch++
+	s.cancelCloudAccount()
 	for _, cancel := range s.commentCancels {
 		cancel()
 	}
@@ -188,6 +189,14 @@ func (s *Service) progress(body object) (object, error) {
 		}
 	}
 	next["history"] = history
+	c := obj(next["cloudSync"])
+	a := obj(c["active"])
+	if str(a["event"]) == "playing" && str(obj(a["episode"])["eid"]) == eid && str(a["account"]) == str(obj(next["user"])["uid"]) {
+		a["position"] = max(0, num(body["position"]))
+		a["playedAt"] = at
+		c["active"] = a
+		next["cloudSync"] = c
+	}
 	if err := s.saveState(next); err != nil {
 		return nil, err
 	}

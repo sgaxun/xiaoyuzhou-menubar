@@ -214,7 +214,12 @@ func main() {
 			b.show()
 		}
 	})
-	mygo.App.WhenReady(func() { b.ready(); b.updates.Start(); go service.RunEpisodeUpdateScheduler(episodeCtx) })
+	mygo.App.WhenReady(func() {
+		b.ready()
+		b.updates.Start()
+		go service.RunEpisodeUpdateScheduler(episodeCtx)
+		go service.StartCloudSync(episodeCtx)
+	})
 	if err = mygo.App.Run(); err != nil {
 		log.Fatal(err)
 	}
