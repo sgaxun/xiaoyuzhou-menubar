@@ -109,6 +109,10 @@ func (b *Backend) show() {
 	b.win.Show()
 	b.win.Focus()
 }
+func pointInTray(point mygo.Point, bounds mygo.Rectangle) bool {
+	return bounds.Width > 0 && bounds.Height > 0 && point.X >= bounds.X && point.X < bounds.X+bounds.Width && point.Y >= bounds.Y && point.Y < bounds.Y+bounds.Height
+}
+
 func (b *Backend) toggle() {
 	if b.win.IsVisible() {
 		b.win.Hide()
@@ -119,12 +123,17 @@ func (b *Backend) toggle() {
 
 func (b *Backend) ready() {
 	var err error
-	b.tray, err = mygo.NewTray(mygo.TrayOptions{ID: "xiaoyuzhou-player", Icon: trayIcon(), IconIsTemplate: true, ToolTip: "小宇宙播放器 — 点击打开播放器"})
+	b.tray, err = mygo.NewTray(mygo.TrayOptions{ID: "xiaoyuzhou-player", Icon: trayIcon(), IconIsTemplate: true, ToolTip: "小宇宙播放器 — 点击显示或隐藏播放器"})
 	if err != nil {
 		log.Fatal(err)
 	}
 	b.win = mygo.NewWindow(mygo.WindowOptions{Title: "小宇宙播放器", Width: 460, Height: 620, Hidden: true, Frameless: true, DisableResize: true, DisableMinimize: true, DisableMaximize: true, DisableFullScreen: true, AlwaysOnTop: false, SkipTaskbar: true, Page: mygo.PageOptions{Autoplay: mygo.AutoplayAllow, BackgroundThrottling: mygo.ThrottlingOff}})
 	b.win.OnBlur(func() {
+		// AppKit may blur the window on mouse-down before the tray click fires.
+		// Let that click decide whether to hide, rather than hiding then reopening.
+		if pointInTray(mygo.Screen.CursorScreenPoint(), b.tray.Bounds()) {
+			return
+		}
 		if !b.pinned.Load() && b.nativeShareDialogs.Load() == 0 {
 			b.win.Hide()
 		}
