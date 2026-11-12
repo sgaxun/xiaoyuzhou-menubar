@@ -22,7 +22,7 @@ async function request(action,body) {
  const data=await window.mygo.call('Backend.Request',action,body===undefined?null:body);
  return data;
 }
-document.addEventListener('keydown',e=>{if(e.key==='Escape'||(e.metaKey&&e.key==='w')){e.preventDefault();window.mygo.call('Backend.Hide')}});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'||((e.metaKey||e.ctrlKey)&&e.key==='w')){e.preventDefault();window.mygo.call('Backend.Hide')}});
 const NotesContext=React.createContext(()=>{});
 const playerRef = {current:null}; const listeners=new Set(); const mountedRef={current:false}; const mountedListeners=new Set();
 
@@ -503,23 +503,17 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
               })();
             });
 
-          // 音频源：优先直连小宇宙 CDN。
-          // 实测经本地代理的流在本环境下 seekable 为 [0,0]，任何 seek 都会被忽略，
-          // 导致"续播无效"；直连 CDN 的 seekable 正常。
-          // 代理仅作为兜底（例如直连被拒时）。
-          let url = `${API.replace('/api', '/audio')}?eid=${encodeURIComponent(episode.eid)}`;
+          // Native builds fetch a signed CDN URL through Go; there is no HTTP proxy route.
+          let url;
           try {
             const r = await apiFetch(`${API}/audioUrl?eid=${encodeURIComponent(episode.eid)}`);
             const d = await r.json();
-            if (d?.ok && d.url) {
-              url = d.url;
-            } else if (d?.paid) {
-              // 付费且未购买：明确提示，而不是静默从头播
-              setError(d.error || '该单集需先在小宇宙 App 内购买');setPlayStatus('error');
-              return;
-            }
-          } catch {
-            /* 取不到就退回代理 */
+            if (!d?.ok || !d.url) throw new Error(d?.error || (d?.paid ? '该单集需先在小宇宙 App 内购买' : '获取音频地址失败，请重试'));
+            url = d.url;
+          } catch (error) {
+            if(requestId!==playRequestRef.current)return;
+            setError(error?.message || '获取音频地址失败，请重试');setPlayStatus('error');
+            return;
           }
           if(requestId!==playRequestRef.current)return;
           const sameEpisode = audio.dataset.xyzEid === episode.eid && audio.readyState > 0;

@@ -166,6 +166,12 @@ func (b *Backend) CopyShareCard(dataURL string) error {
 	if err != nil {
 		return err
 	}
+	if runtime.GOOS == "windows" {
+		if err := mygo.Clipboard.WriteImage(data); err != nil {
+			return fmt.Errorf("复制卡片失败: %w", err)
+		}
+		return mygo.Clipboard.Flush()
+	}
 	helper, err := shareHelperPath()
 	if err != nil {
 		return err

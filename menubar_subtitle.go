@@ -10,6 +10,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 
@@ -28,8 +29,7 @@ var subtitleFont struct {
 
 func loadSubtitleFont() (font.Face, error) {
 	subtitleFont.Do(func() {
-		paths, _ := filepath.Glob("/System/Library/AssetsV2/com_apple_MobileAsset_Font*/*/AssetData/PingFang.ttc")
-		paths = append(paths, "/System/Library/Fonts/PingFang.ttc", "/System/Library/Fonts/STHeiti Light.ttc")
+		paths := subtitleFontPaths()
 		for _, path := range paths {
 			raw, err := os.ReadFile(path)
 			if err != nil {
@@ -57,6 +57,21 @@ func loadSubtitleFont() (font.Face, error) {
 		return nil, fmt.Errorf("字幕字体加载失败: %w", subtitleFont.err)
 	}
 	return subtitleFont.face, nil
+}
+
+// Windows resolves fonts from its actual installation directory, including TTC
+// Chinese fonts and TTF fallbacks. Keep the macOS candidate order unchanged.
+func subtitleFontPaths() []string {
+	if runtime.GOOS == "windows" {
+		root := os.Getenv("WINDIR")
+		if root == "" {
+			root = `C:\Windows`
+		}
+		fonts := filepath.Join(root, "Fonts")
+		return []string{filepath.Join(fonts, "msyh.ttc"), filepath.Join(fonts, "msyh.ttf"), filepath.Join(fonts, "msjh.ttc"), filepath.Join(fonts, "simhei.ttf"), filepath.Join(fonts, "simsun.ttc"), filepath.Join(fonts, "segoeui.ttf")}
+	}
+	paths, _ := filepath.Glob("/System/Library/AssetsV2/com_apple_MobileAsset_Font*/*/AssetData/PingFang.ttc")
+	return append(paths, "/System/Library/Fonts/PingFang.ttc", "/System/Library/Fonts/STHeiti Light.ttc")
 }
 
 const subtitleWidth, subtitleHeight, subtitleLeft = 476, 36, 48

@@ -1,13 +1,18 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
 	"fmt"
+	"image"
+	"image/color"
+	"image/png"
 	"log"
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -86,6 +91,9 @@ func (b *Backend) MediaState(title, artist string, playing bool, position, durat
 func (b *Backend) MenuSubtitle(text string, progress float64) error {
 	b.mediaMu.Lock()
 	defer b.mediaMu.Unlock()
+	if runtime.GOOS == "windows" {
+		return b.platformSubtitle(text, progress)
+	}
 	if b.tray == nil {
 		return nil
 	}
@@ -104,8 +112,8 @@ func (b *Backend) show() {
 	anchor := b.tray.Bounds()
 	bounds := b.win.Bounds()
 	area := mygo.Screen.DisplayNearestPoint(mygo.Point{X: anchor.X + anchor.Width/2, Y: anchor.Y + anchor.Height/2}).WorkArea
-	x := max(area.X, min(anchor.X+(anchor.Width-bounds.Width)/2, area.X+area.Width-bounds.Width))
-	b.win.SetPosition(x, max(area.Y, anchor.Y+anchor.Height+6))
+	x, y := trayWindowPosition(anchor, bounds, area)
+	b.win.SetPosition(x, y)
 	b.win.Show()
 	b.win.Focus()
 }
@@ -150,12 +158,22 @@ func (b *Backend) ready() {
 		}
 	})
 	var firstLoad sync.Once
-	b.win.Page().OnDidFinishLoad(func() { firstLoad.Do(b.show) })
+	b.win.Page().OnDidFinishLoad(func() {
+		firstLoad.Do(func() {
+			b.show()
+			if os.Getenv("XIAOYUZHOU_NATIVE_SMOKE_RESULT") != "" {
+				go b.nativeSmoke()
+			}
+		})
+	})
 	b.win.Page().LoadHTML(page, "")
 	b.tray.OnClick(b.toggle)
 	b.subtitleToggle = &mygo.MenuItem{Label: "菜单栏显示字幕", Type: mygo.MenuItemCheckbox, Checked: false, Click: func(*mygo.MenuItem, *mygo.Window) {
 		go b.win.Page().Eval("window.dispatchEvent(new Event('xyz-toggle-menubar-transcript'))")
 	}}
+	if runtime.GOOS == "windows" {
+		b.subtitleToggle.Label = "桌面显示字幕"
+	}
 	b.pinToggle = &mygo.MenuItem{Label: "置顶窗口", Type: mygo.MenuItemCheckbox, Click: func(item *mygo.MenuItem, _ *mygo.Window) { b.SetPinned(item.IsChecked()) }}
 	menu := mygo.NewMenu([]*mygo.MenuItem{
 		{Label: "打开播放器", Click: func(*mygo.MenuItem, *mygo.Window) { b.show() }},
@@ -194,13 +212,34 @@ func (b *Backend) ready() {
 
 }
 
-func trayIcon() []byte { return appicon.TemplatePNG() }
+func trayIcon() []byte {
+	raw := appicon.TemplatePNG()
+	if runtime.GOOS != "windows" {
+		return raw
+	}
+	// Windows tints a black template white on dark taskbars, retaining black on light ones.
+	src, err := png.Decode(bytes.NewReader(raw))
+	if err != nil {
+		return raw
+	}
+	img := image.NewNRGBA(src.Bounds())
+	for y := img.Bounds().Min.Y; y < img.Bounds().Max.Y; y++ {
+		for x := img.Bounds().Min.X; x < img.Bounds().Max.X; x++ {
+			_, _, _, a := src.At(x, y).RGBA()
+			img.SetNRGBA(x, y, color.NRGBA{A: uint8(a >> 8)})
+		}
+	}
+	var out bytes.Buffer
+	if png.Encode(&out, img) != nil {
+		return raw
+	}
+	return out.Bytes()
+}
 
 func main() {
-	home, _ := os.UserHomeDir()
-	dir := filepath.Join(home, "Library/Application Support/XiaoyuzhouMenuBar")
-	if custom := os.Getenv("XIAOYUZHOU_MENUBAR_DATA_DIR"); custom != "" {
-		dir = custom
+	dir, err := defaultDataDir()
+	if err != nil {
+		log.Fatal("定位播放器数据失败：", err)
 	}
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		log.Fatal("初始化播放器数据失败：", err)
@@ -217,7 +256,14 @@ func main() {
 	mygo.Theme.SetSource(mygo.ThemeSystem)
 	mygo.App.SetActivationPolicy(mygo.ActivationPolicyAccessory)
 	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) { b.quitting = true })
-	mygo.App.OnWillQuit(func(*mygo.QuitEvent) { cancelEpisodes(); b.updates.Close(); mygo.NowPlaying.Clear(); b.tray.Destroy() })
+	mygo.App.OnWillQuit(func(*mygo.QuitEvent) {
+		cancelEpisodes()
+		b.updates.Close()
+		mygo.NowPlaying.Clear()
+		if b.tray != nil {
+			b.tray.Destroy()
+		}
+	})
 	mygo.App.OnActivate(func(visible bool) {
 		if !visible && b.win != nil {
 			b.show()

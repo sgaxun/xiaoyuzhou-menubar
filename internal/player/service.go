@@ -307,6 +307,9 @@ func (s *Service) dispatch(ctx context.Context, action string, q url.Values, bod
 		return object{"ok": true, "importedProgress": applied, "queue": next["queue"], "index": next["queueIndex"]}, nil
 	case "savePrefs":
 		next := clone(s.state)
+		if enabled, valid := body["menubarTranscript"].(bool); valid {
+			next["menubarTranscript"] = enabled
+		}
 		for _, k := range []string{"volume", "rate", "panelWidth", "panelHeight"} {
 			if v, exists := body[k]; exists {
 				if _, isNum := v.(float64); isNum {

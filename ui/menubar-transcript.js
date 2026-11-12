@@ -3,17 +3,48 @@ import {createSubtitleScheduler,scrollingSubtitle} from './menubar-transcript-sc
 const {createElement:h,useEffect,useRef,useState}=React;
 const preference='xyz-menubar-transcript';
 function readEnabled(){if(typeof window[preference]==='boolean')return window[preference];try{return localStorage.getItem(preference)==='true'}catch{return false}}
-function toggleEnabled(){const next=!readEnabled();window[preference]=next;try{localStorage.setItem(preference,String(next))}catch{/* Embedded pages may deny storage; keep the switch usable for this session. */}window.dispatchEvent(new Event(preference))}
+// Keep bridge state on the window: both settings and the player subscribe, but
+// hydrate only once per page. Revision protects user clicks during the read.
+function persistEnabled(enabled){
+ const key=preference+'-writes';
+ window[key]=Promise.resolve(window[key]).catch(()=>{}).then(()=>window.mygo.call('Backend.SaveSubtitlePreference',enabled));
+ // A failed disk write must not break subsequent writes or the session switch.
+ window[key].catch(()=>{});
+ return window[key];
+}
+function publishEnabled(enabled){window[preference]=enabled;try{localStorage.setItem(preference,String(enabled))}catch{/* Native prefs are authoritative for opaque origins. */}window.dispatchEvent(new Event(preference))}
+function toggleEnabled(){
+ const next=!readEnabled();
+ window[preference+'-revision']=(window[preference+'-revision']||0)+1;
+ publishEnabled(next);persistEnabled(next);
+}
+function hydrateEnabled(){
+ const key=preference+'-hydration';
+ if(window[key])return;
+ const revision=window[preference+'-revision']||0;
+ window[key]=Promise.resolve().then(()=>window.mygo.call('Backend.SubtitlePreference')).then(result=>{
+  if((window[preference+'-revision']||0)!==revision)return;
+  if(typeof result?.enabled==='boolean'){publishEnabled(result.enabled);return}
+  if(result?.enabled===null){
+   // Only migrate a known old value, never save a default before hydration.
+   let legacy;try{legacy=localStorage.getItem(preference)}catch{return}
+   if(legacy==='true'||legacy==='false')persistEnabled(legacy==='true');
+  }
+ }).catch(()=>{delete window[key]});
+}
 function useEnabled(){
  const [enabled,setEnabled]=useState(readEnabled);
- useEffect(()=>{const update=()=>setEnabled(readEnabled());window.addEventListener(preference,update);return()=>window.removeEventListener(preference,update)},[]);
+ useEffect(()=>{const update=()=>setEnabled(readEnabled());window.addEventListener(preference,update);hydrateEnabled();return()=>window.removeEventListener(preference,update)},[]);
  return enabled;
+}
+export function isWindowsSubtitlePlatform(platform=globalThis.navigator){
+ return /windows|win32|win64/i.test(`${platform?.userAgent||''} ${platform?.platform||''}`);
 }
 export function MenubarTranscriptSettings(){
  const enabled=useEnabled();
  return h('div',{className:'xyz-setting-row'},h('div',{className:'xyz-setting-label'},
-  h('div',{className:'xyz-setting-name'},'菜单栏显示字幕'),
-  h('div',{className:'xyz-setting-desc'},'固定宽度滚动显示，随播放进度前进和回退')),
+  h('div',{className:'xyz-setting-name'},isWindowsSubtitlePlatform()?'桌面底部显示字幕':'菜单栏显示字幕'),
+  h('div',{className:'xyz-setting-desc'},isWindowsSubtitlePlatform()?'底部置顶字幕条，随播放进度滚动，不影响当前窗口':'固定宽度滚动显示，随播放进度前进和回退')),
   h('button',{type:'button',className:'xyz-btn','aria-pressed':enabled,onClick:toggleEnabled},enabled?'已开启':'已关闭'));
 }
 export {scrollingSubtitle} from './menubar-transcript-scheduler.js';
