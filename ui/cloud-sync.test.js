@@ -88,3 +88,59 @@ test('settings separates waiting and failure and only offers retry for failures'
     }
   }finally{globalThis.window=previous}
 });
+
+test('pull applies committed resume points without replay and leaves progress failures visible',async()=>{
+  const React=await import('react');
+  const {default:Renderer,act}=await import('react-test-renderer');
+  const {PullCloudPlaylist}=await import('./cloud-sync.js');
+  const ep={eid:'episode'},baseline={position:20,updatedAt:'older'};
+  let imported;
+  const player={queue:[ep],current:ep,progressRef:{current:{episode:baseline}},flushLocalData:async()=>{},protectedProgressEid:()=>'',setQueue(){},setIndex(){},applyImportedProgress:(records,snapshot)=>{imported=records;assert.equal(snapshot.episode,baseline)}};
+  const call=async(action,body)=>{
+    if(action==='pullCloudPlaylist'){assert.equal(body.protectedEid,'');return {queue:[ep],cloudImportId:'preview',progressWarning:'进度未同步'}}
+    assert.equal(body.cloudImportId,'preview');return {importedProgress:{episode:{position:100}}};
+  };
+  let tree;
+  await act(async()=>{tree=Renderer.create(React.createElement(PullCloudPlaylist,{call,player,loggedIn:true}))});
+  await act(async()=>{await tree.root.findByType('button').props.onClick()});
+  assert.equal(imported.episode.position,100);
+  assert.match(JSON.stringify(tree.toJSON()),/进度未同步/);
+  await act(async()=>tree.unmount());
+});
+
+test('cloud pull uses the committed queue after finished remote items are removed',async()=>{
+  const React=await import('react');
+  const {default:Renderer,act}=await import('react-test-renderer');
+  const {PullCloudPlaylist}=await import('./cloud-sync.js');
+  const playing={eid:'playing'},gone={eid:'gone'};
+  let queue,index;
+  const player={queue:[playing,gone],current:playing,flushLocalData:async()=>{},protectedProgressEid:()=>playing.eid,setQueue:q=>queue=q,setIndex:i=>index=i};
+  const call=async(action,body)=>{
+    if(action==='pullCloudPlaylist')return {queue:[playing,gone],cloudImportId:'test'};
+    assert.equal(body.currentEid,'playing');assert.equal(body.protectedEid,'playing');
+    return {queue:[playing],index:0,importedProgress:{}};
+  };
+  let tree;
+  await act(async()=>{tree=Renderer.create(React.createElement(PullCloudPlaylist,{call,player,loggedIn:true}))});
+  await act(async()=>{await tree.root.findByType('button').props.onClick()});
+  assert.deepEqual(queue,[playing]);assert.equal(index,0);
+  assert.match(JSON.stringify(tree.toJSON()),/移除 1 期已听完节目/);
+  await act(async()=>tree.unmount());
+});
+
+test('a paused selected finished episode is cleared after removal',async()=>{
+  const React=await import('react');
+  const {default:Renderer,act}=await import('react-test-renderer');
+  const {PullCloudPlaylist}=await import('./cloud-sync.js');
+  const finished={eid:'finished'};let discarded=false,queue;
+  const player={queue:[finished],current:finished,playing:false,flushLocalData:async()=>{},protectedProgressEid:()=>finished.eid,setQueue:q=>queue=q,setIndex(){},discardFinishedCurrent:()=>discarded=true};
+  const call=async(action,body)=>{
+    if(action==='pullCloudPlaylist')return {queue:[finished],cloudImportId:'test'};
+    assert.equal(body.playingEid,'');return {queue:[],index:-1,importedProgress:{}};
+  };
+  let tree;
+  await act(async()=>{tree=Renderer.create(React.createElement(PullCloudPlaylist,{call,player,loggedIn:true}))});
+  await act(async()=>{await tree.root.findByType('button').props.onClick()});
+  assert.deepEqual(queue,[]);assert.equal(discarded,true);
+  await act(async()=>tree.unmount());
+});

@@ -803,13 +803,34 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
         return () => window.removeEventListener('pagehide', flush);
       }, [sendProgress]);
 
+      const discardFinishedCurrent=useCallback(()=>{
+        const audio=audioRef.current;
+        if(audio && !audio.paused)return;
+        playRequestRef.current++;
+        if(audio){audio.removeAttribute('src');delete audio.dataset.xyzEid;audio.load()}
+        mediaEpisodeRef.current=null;pendingSeekRef.current=null;
+        currentRef.current=null;setCurrent(null);setPosition(0);setDuration(0);setPlayStatus('idle');
+      },[]);
+      const protectedProgressEid=useCallback(()=>{
+        const ep=currentRef.current,a=audioRef.current;
+        return ep && ((a?.dataset.xyzEid===ep.eid && a.readyState>0) || pendingSeekRef.current?.eid===ep.eid) ? ep.eid : '';
+      },[]);
+      const applyImportedProgress=useCallback((records,baseline)=>{
+        for(const [eid,entry] of Object.entries(records)) {
+          // A local seek/play after the commit began wins over the response.
+          if(progressRef.current[eid] !== baseline[eid] || eid===protectedProgressEid())continue;
+          progressRef.current[eid]=entry;
+          if(currentRef.current?.eid===eid)setPosition(Number(entry.position)||0);
+        }
+      },[protectedProgressEid]);
+
       const flushLocalData=useCallback(async(pause=false)=>{
         if(pause){playRequestRef.current++;audioRef.current?.pause()}
         await libraryWrites.current;
         const ep=currentRef.current,a=audioRef.current;
-        if(ep){const pos=pendingSeekRef.current?.eid===ep.eid?pendingSeekRef.current.position:(a?.dataset.xyzEid===ep.eid&&a.readyState>0?a.currentTime:(Number(progressRef.current?.[ep.eid]?.position)||0));await sendProgress(ep,pos,true)}
+        if(ep && protectedProgressEid()){const pos=pendingSeekRef.current?.eid===ep.eid?pendingSeekRef.current.position:(a?.dataset.xyzEid===ep.eid&&a.readyState>0?a.currentTime:(Number(progressRef.current?.[ep.eid]?.position)||0));await sendProgress(ep,pos,true)}
         await call('saveQueue',{queue:queue.map(queueEpisode),index});
-      },[queue,index,sendProgress]);
+      },[queue,index,sendProgress,protectedProgressEid]);
       const reloadLocalState=useCallback(async()=>{
         await libraryWrites.current;
         const d=await call('state'), state=d.state||{};
@@ -824,7 +845,7 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
       },[hydrateLibrary,setSleepMode]);
       const retry=()=>{const ep=currentRef.current;if(!ep)return;retryRef.current[ep.eid]=0;const pos=pendingSeekRef.current?.eid===ep.eid?pendingSeekRef.current.position:position;const a=audioRef.current;a?.removeAttribute('src');a?.load();play(ep,pos)};
       return {
-        library,hydrateLibrary,changeLibrary,enqueue,reloadLocalState,flushLocalData,
+        library,hydrateLibrary,changeLibrary,enqueue,reloadLocalState,flushLocalData,protectedProgressEid,applyImportedProgress,discardFinishedCurrent,
         playStatus,retry,sleepMode,setSleepMode,sleepRemaining,changeRate,
         audioRef, progressRef, current, setCurrent, queue, setQueue, index, setIndex,
         playing, position, duration, rate, volume, error, setError, setRate, setVolume,

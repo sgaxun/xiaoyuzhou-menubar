@@ -38,7 +38,9 @@ export function PullCloudPlaylist({call,player,loggedIn,onUpdated}) {
     try {
       await latest.current.flushLocalData(false);
       const snapshot=latest.current.queue, currentEid=latest.current.current?.eid || '';
-      const data = await call('pullCloudPlaylist',{currentEid});
+      const baseline={...(latest.current.progressRef?.current || {})};
+      const protectedEid=latest.current.protectedProgressEid?.() || '';
+      const data = await call('pullCloudPlaylist',{currentEid,protectedEid});
       const p=latest.current;
       // The backend only previews. A changed local queue wins over a late result.
       if(p.queue !== snapshot || (p.current?.eid || '') !== currentEid) {
@@ -46,12 +48,23 @@ export function PullCloudPlaylist({call,player,loggedIn,onUpdated}) {
         return;
       }
       const queue=[...(data.queue || [])];
-      p.setQueue(queue);
-      p.setIndex(p.current ? queue.findIndex(ep=>ep.eid===p.current.eid) : -1);
-      await call('saveQueue',{queue:queue.map(queueEpisode),index:p.current ? queue.findIndex(ep=>ep.eid===p.current.eid) : -1});
+      const saved=await call('saveQueue',{queue:queue.map(queueEpisode),index:p.current ? queue.findIndex(ep=>ep.eid===p.current.eid) : -1,cloudImportId:data.cloudImportId,currentEid:p.current?.eid || '',playingEid:p.playing ? p.current?.eid || '' : '',protectedEid:p.protectedProgressEid?.() || ''});
+      const committedQueue=saved.queue || queue;
+      // Do not apply a late response over edits made while committing.
+      if(latest.current.queue===snapshot && (latest.current.current?.eid || '')===currentEid) {
+        latest.current.setQueue(committedQueue);
+        const currentIndex=latest.current.current ? committedQueue.findIndex(ep=>ep.eid===latest.current.current.eid) : -1;
+        latest.current.setIndex(currentIndex);
+        if(latest.current.current && currentIndex<0) {
+          if(latest.current.discardFinishedCurrent)latest.current.discardFinishedCurrent();
+          else latest.current.setCurrent?.(null);
+        }
+      }
+      latest.current.applyImportedProgress?.(saved.importedProgress || {},baseline);
       await onUpdated?.();
-      setMessage('云端列表已合并');
-      messageTimer.current=setTimeout(()=>setMessage(''),3000);
+      const removed=queue.length-committedQueue.length;
+      setMessage(data.progressWarning || `云端列表和收听进度已合并${removed>0 ? `，移除 ${removed} 期已听完节目` : ''}`);
+      if(!data.progressWarning)messageTimer.current=setTimeout(()=>setMessage(''),3000);
     } catch(error){setMessage(error.message)}
     finally{lock.current=false;setBusy(false)}
   };

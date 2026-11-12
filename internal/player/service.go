@@ -18,29 +18,30 @@ import (
 )
 
 type Service struct {
-	cloudWake          chan struct{}
-	cloudCancel        context.CancelFunc
-	cloudActive        string
-	cloudRunning       bool
-	cloudPlayback      string
-	cloudPlaybackEvent string
-	cloudCancels       map[uint64]context.CancelFunc
-	cloudSeq           uint64
-	mu                 sync.Mutex
-	commentRefreshMu   sync.Mutex
-	accountEpoch       uint64
-	commentSeq         uint64
-	commentCancels     map[uint64]context.CancelFunc
-	updateMu           sync.Mutex
-	updateEpoch        uint64
-	updateLast         time.Time
-	updateChecking     bool
-	updateAutoCancel   context.CancelFunc
-	dir                string
-	state              object
-	cache              object
-	client             *podcast.Client
-	qr                 *qrauth.Auth
+	cloudPlaylistPreview object
+	cloudWake            chan struct{}
+	cloudCancel          context.CancelFunc
+	cloudActive          string
+	cloudRunning         bool
+	cloudPlayback        string
+	cloudPlaybackEvent   string
+	cloudCancels         map[uint64]context.CancelFunc
+	cloudSeq             uint64
+	mu                   sync.Mutex
+	commentRefreshMu     sync.Mutex
+	accountEpoch         uint64
+	commentSeq           uint64
+	commentCancels       map[uint64]context.CancelFunc
+	updateMu             sync.Mutex
+	updateEpoch          uint64
+	updateLast           time.Time
+	updateChecking       bool
+	updateAutoCancel     context.CancelFunc
+	dir                  string
+	state                object
+	cache                object
+	client               *podcast.Client
+	qr                   *qrauth.Auth
 }
 
 func New(dir string) (*Service, error) { return NewWithClient(dir, podcast.NewClient()) }
@@ -290,7 +291,20 @@ func (s *Service) dispatch(ctx context.Context, action string, q url.Values, bod
 			f["episodes"] = pending
 			next["episodeUpdates"] = f
 		}
-		return ok, s.saveState(next)
+		applied := object{}
+		if str(body["cloudImportId"]) != "" {
+			var err error
+			applied, err = s.mergeCloudPlaylistProgress(next, body)
+			if err != nil {
+				return nil, err
+			}
+			s.mergeCloudQueueRemoval(next, body)
+		}
+		delete(next, "cloudQueueSources")
+		if err := s.saveState(next); err != nil {
+			return nil, err
+		}
+		return object{"ok": true, "importedProgress": applied, "queue": next["queue"], "index": next["queueIndex"]}, nil
 	case "savePrefs":
 		next := clone(s.state)
 		for _, k := range []string{"volume", "rate", "panelWidth", "panelHeight"} {

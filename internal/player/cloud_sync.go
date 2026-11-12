@@ -394,15 +394,17 @@ func (s *Service) runCloudTask(ctx context.Context, token string, t object, epoc
 	err := s.saveState(clone(s.state))
 	s.mu.Unlock()
 	if err != nil {
-  s.mu.Lock()
-  a := cloudAccount(s.cloudStore(), account)
-  a["blocked"] = true; a["error"] = err.Error()
-  live := obj(obj(s.cloudStore()["tasks"])[key])
-  delete(live,"inFlight"); live["error"] = err.Error()
-  s.mu.Unlock()
-  return
- }
- defer func() {
+		s.mu.Lock()
+		a := cloudAccount(s.cloudStore(), account)
+		a["blocked"] = true
+		a["error"] = err.Error()
+		live := obj(obj(s.cloudStore()["tasks"])[key])
+		delete(live, "inFlight")
+		live["error"] = err.Error()
+		s.mu.Unlock()
+		return
+	}
+	defer func() {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		live := obj(obj(s.cloudStore()["tasks"])[key])
@@ -458,12 +460,13 @@ func (s *Service) runCloudTask(ctx context.Context, token string, t object, epoc
 			trimCloudCompleted(c)
 		}
 		saveErr := s.saveState(clone(s.state))
-  if saveErr != nil {
-   a := cloudAccount(s.cloudStore(),account)
-   a["blocked"] = true; a["error"] = saveErr.Error()
-   _ = s.saveState(clone(s.state))
-  }
-  s.mu.Unlock()
+		if saveErr != nil {
+			a := cloudAccount(s.cloudStore(), account)
+			a["blocked"] = true
+			a["error"] = saveErr.Error()
+			_ = s.saveState(clone(s.state))
+		}
+		s.mu.Unlock()
 		if err != nil || saveErr != nil || !same {
 			return
 		}
@@ -523,6 +526,10 @@ func (s *Service) pullCloudPlaylist(ctx context.Context, body object) (any, erro
 			}
 		}
 	}
+	beforeQueue := map[string]bool{}
+	for _, v := range list(s.state["queue"]) {
+		beforeQueue[str(obj(v)["eid"])] = true
+	}
 	s.mu.Unlock()
 	defer func() { cancel(); s.mu.Lock(); delete(s.cloudCancels, seq); s.mu.Unlock() }()
 	var ids []string
@@ -550,6 +557,31 @@ func (s *Service) pullCloudPlaylist(ctx context.Context, body object) (any, erro
 		queue = append(queue, ep)
 		imported[id] = true
 	}
+	var cloudProgress []map[string]any
+	progressError := ""
+	err = s.cloudAuthorized(requestCtx, epoch, token, func(token string) error {
+		var e error
+		cloudProgress, e = s.client.ListPlaybackProgress(requestCtx, token, ids)
+		return e
+	})
+	if err != nil {
+		progressError = "列表已拉取，但收听进度未同步，请稍后重新拉取"
+	}
+	finished := map[string]bool{}
+	if len(beforeQueue) > 0 || len(imported) > 0 {
+		err = s.cloudAuthorized(requestCtx, epoch, token, func(token string) error {
+			var e error
+			finished, e = s.client.FinishedHistoryEpisodes(requestCtx, token)
+			return e
+		})
+		if err != nil {
+			finished = map[string]bool{}
+			if progressError != "" {
+				progressError += "；"
+			}
+			progressError += "已听完状态未能检查，保留原有单集"
+		}
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if epoch != s.accountEpoch || requestCtx.Err() != nil {
@@ -562,6 +594,12 @@ func (s *Service) pullCloudPlaylist(ctx context.Context, body object) (any, erro
 		i := int(num(next["queueIndex"]))
 		if i >= 0 && i < len(old) {
 			current = str(obj(old[i])["eid"])
+		}
+	}
+	removeIDs := []any{}
+	for id, complete := range finished {
+		if complete {
+			removeIDs = append(removeIDs, id)
 		}
 	}
 	seen := map[string]bool{}
@@ -585,7 +623,9 @@ func (s *Service) pullCloudPlaylist(ctx context.Context, body object) (any, erro
 	// Preview only: the UI commits through saveQueue after checking that no
 	// local queue edit or playback transition occurred during this request.
 
-	return object{"ok": true, "queue": queue, "index": index, "cloudSync": s.cloudSyncView()}, nil
+	importID := fmt.Sprint(time.Now().UnixNano())
+	s.cloudPlaylistPreview = object{"id": importID, "epoch": epoch, "records": cloudProgress, "protectedEid": str(body["protectedEid"]), "createdAt": nowISO(), "removeIDs": removeIDs}
+	return object{"ok": true, "queue": queue, "index": index, "cloudImportId": importID, "progressWarning": progressError, "cloudSync": s.cloudSyncView()}, nil
 }
 
 func (s *Service) cloudAuthorized(ctx context.Context, epoch uint64, token string, send func(string) error) error {

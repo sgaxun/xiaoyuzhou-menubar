@@ -4,6 +4,7 @@ node_modules/
 /.mygo/
 /assets/player.html
 /work/
+/tmp/
 *.dmg
 *.log
 .DS_Store

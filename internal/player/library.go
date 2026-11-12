@@ -246,6 +246,8 @@ func (s *Service) ImportLocalBackup(raw []byte) error {
 	defer s.mu.Unlock()
 	next := clone(s.state)
 	next["queue"], next["queueIndex"], next["progress"], next["library"] = valid.Queue, valid.QueueIndex, valid.Progress, valid.Library
+	// Discard obsolete cloud-origin tracking from older local builds.
+	delete(next, "cloudQueueSources")
 	for k, v := range valid.Prefs {
 		next[k] = v
 	}

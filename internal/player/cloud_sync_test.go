@@ -194,6 +194,12 @@ func TestCloudPullOrderMetadataAndUnlockedRequest(t *testing.T) {
 		} else {
 			s.mu.Unlock()
 		}
+		if r.URL.Path == "/v1/episode-played/list-history" {
+			return reply(200, `{"data":[]}`), nil
+		}
+		if r.URL.Path == "/v1/playback-progress/list" {
+			return reply(200, `{"data":[]}`), nil
+		}
 		if r.URL.Path != "/v1/playlist/pull" {
 			t.Fatalf("metadata was not reused: %s", r.URL.Path)
 		}
