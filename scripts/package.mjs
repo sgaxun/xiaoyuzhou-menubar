@@ -4,6 +4,7 @@ import {readFile,readdir,copyFile,unlink,mkdir,rm,writeFile} from 'node:fs/promi
 import {fileURLToPath} from 'node:url';
 import {join} from 'node:path';
 import {homedir} from 'node:os';
+import {createHash} from 'node:crypto';
 const root=fileURLToPath(new URL('..',import.meta.url));
 const outputs=join(root,'release');
 const windows=process.platform==='win32';
@@ -43,6 +44,8 @@ if(windows){
  const names=[`${slug}-setup-${version}-amd64.exe`,'install.ps1'];
  if(buildEnv.MYGO_UPDATER_PRIVATE_KEY)names.push(`update-${targetPlatform}.json`,`${slug}-${version}-${targetPlatform}.tar.gz`);
  for(const name of names)await copyFile(join(build,name),join(outputs,name));
+ const sums=await Promise.all(names.map(async name=>`${createHash('sha256').update(await readFile(join(outputs,name))).digest('hex')}  ${name}`));
+ await writeFile(join(outputs,'SHA256SUMS'),sums.join('\n')+'\n');
  for(const name of await readdir(outputs)){
   if((name.startsWith(`${slug}-setup-`)&&name.endsWith('-amd64.exe')||name.startsWith(`${slug}-`)&&name.endsWith('-windows-amd64.tar.gz')||name==='update-windows-amd64.json')&&!names.includes(name))await unlink(join(outputs,name));
  }

@@ -54,7 +54,7 @@ release 会核对 manifest 指向当前仓库 `releases/download/v<version>/`、
 MYGO_UPDATER_PRIVATE_KEY_FILE="$HOME/.config/xiaoyuzhou-menubar/update-keys/mygo-update.key" npm run release -- --draft
 ```
 
-需 gh 已登录或有 GH_TOKEN。仅创建/复用草稿并上传当前平台的产物（macOS 三个，Windows 四个）；重跑可覆盖草稿同名附件，已正式发布的版本一律拒绝覆盖。预发布版本会给草稿加 prerelease 标记。脚本从不正式发布。
+需 gh 已登录或有 GH_TOKEN。仅创建/复用草稿并上传当前平台的产物（macOS 三个，Windows 五个）；重跑可覆盖草稿同名附件，已正式发布的版本一律拒绝覆盖。预发布版本会给草稿加 prerelease 标记。脚本从不正式发布。
 
 ## GitHub Actions
 
@@ -70,9 +70,9 @@ npm run release
 # 仅在明确准备上传草稿时：npm run release -- --draft
 ```
 
-同一草稿应包含两个平台共七个附件。各平台打包只清理自身旧安装包及更新文件，不删除另一平台 release 产物。构建临时目录 build 会重建，不能并行在同一工作区打包。
+同一草稿应包含两个平台共八个附件（包含 Windows 安装引导脚本依赖的 SHA256SUMS）。各平台打包只清理自身旧安装包及更新文件，不删除另一平台 release 产物。构建临时目录 build 会重建，不能并行在同一工作区打包。
 
-Windows 安装为每用户安装，MyGo 更新直接验证并替换归档内应用文件，不运行 NSIS 安装包；重启使用原 EXE 路径，下次启动清理仍被占用的旧文件。`install.ps1` 用于初次安装，不是应用内更新协议。以上对照 v0.8.3 的 `cmd/mygo/build.go`、`nsis.go`、`updates.go`、`updater.go` 和 `internal/update` 源码。更新 Ed25519 签名不等于 Windows Authenticode 签名，目前配置不提供 Authenticode 签名，可能出现 SmartScreen 提示。
+Windows 默认安装到 Program Files\XiaoyuzhouPlayer，安装需要管理员权限；普通权限下只读检查更新，用户触发更新安装时提权，并由辅助进程重新读取内置更新源、匹配版本和验证签名，再替换应用文件，不运行 NSIS 安装包；重启使用原 EXE 路径，下次启动清理仍被占用的旧文件。`install.ps1` 用于初次安装，不是应用内更新协议。以上对照 v0.8.3 的 `cmd/mygo/build.go`、`nsis.go`、`updates.go`、`updater.go` 和 `internal/update` 源码。更新 Ed25519 签名不等于 Windows Authenticode 签名，目前配置不提供 Authenticode 签名，可能出现 SmartScreen 提示。
 
 工作流只产出草稿。人工检查两平台安装、托盘、音频、分享，以及上一版应用下载并重启安装更新，再在 GitHub Releases 页面正式发布。Windows 需要 WebView2 Evergreen Runtime。草稿不会被已安装应用作为正式更新发现。当前 package 构建跳过 Apple 公证时，不代表具备 Developer ID 分发资质；MyGo 更新签名本身不替代系统代码签名。
 

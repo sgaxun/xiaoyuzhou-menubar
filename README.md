@@ -4,7 +4,7 @@
 
 在 macOS 菜单栏听小宇宙。收起窗口后继续播放，不占 Dock，播放列表和收听进度保存在本机。
 
-构建目标：Apple Silicon Mac（M1 及后续机型）和 Windows 10/11 x64。Windows 安装包支持已加入构建流程，需完成 Windows CI 与实机验收后发布。
+支持 Apple Silicon Mac（M1 及后续机型）和 Windows 10/11 x64。Windows 版在系统托盘运行，并提供桌面悬浮字幕。
 
 [下载最新版](https://github.com/sgaxun/xiaoyuzhou-player/releases/latest) · [更新记录](CHANGELOG.md)
 

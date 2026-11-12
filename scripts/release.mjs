@@ -66,7 +66,7 @@ async function main() {
     const dmgs = (await readdir(output)).filter(name => name.endsWith('.dmg') && name.includes(`-${version}-`));
     if (dmgs.length !== 1) throw Error('release 目录必须包含当前版本唯一 DMG');
   }
-  const assets = [installerName, archiveName, manifestName, ...(windows ? ['install.ps1'] : [])].map(name => join(output, name));
+  const assets = [installerName, archiveName, manifestName, ...(windows ? ['install.ps1', 'SHA256SUMS'] : [])].map(name => join(output, name));
   for (const asset of assets) if (!(await stat(asset)).size) throw Error('release 目录存在空产物');
   if (!draft) { console.log(`已验证 ${tag} ${target} 安装包、签名更新归档及 manifest；未进行远端写入。`); return; }
   const ghEnv = {...process.env};
