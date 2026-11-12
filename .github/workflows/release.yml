@@ -10,7 +10,21 @@ concurrency:
   cancel-in-progress: false
 jobs:
   release:
-    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 1 # Both platforms reuse one draft; avoid concurrent creation.
+      matrix:
+        include:
+          - os: macos-latest
+            arch: arm64
+            target: darwin-arm64
+          - os: windows-latest
+            arch: x64
+            target: windows-amd64
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -23,12 +37,13 @@ jobs:
       - name: Check target repository, version tag and architecture
         env:
           EXPECTED_REPOSITORY: ${{ github.repository }}
+          EXPECTED_ARCH: ${{ matrix.arch }}
         run: |
           node --input-type=module <<'JS'
           import {readFileSync} from 'node:fs';
           const c = JSON.parse(readFileSync('mygo.json', 'utf8'));
           const p = JSON.parse(readFileSync('package.json', 'utf8'));
-          if (process.arch !== 'arm64') throw Error('arm64 runner required');
+          if (process.arch !== process.env.EXPECTED_ARCH) throw Error('runner architecture mismatch');
           if (c.updates?.github?.toLowerCase() !== process.env.EXPECTED_REPOSITORY.toLowerCase()) throw Error('updates.github repository mismatch');
           if (process.env.GITHUB_REF_TYPE !== 'tag' || process.env.GITHUB_REF_NAME !== `v${c.version}` || p.version !== c.version) throw Error('Select/push the matching version tag');
           if (!p.scripts?.release) throw Error('package.json requires scripts.release = node scripts/release.mjs');
@@ -42,9 +57,7 @@ jobs:
         run: npm run release -- --draft
       - uses: actions/upload-artifact@v4
         with:
-          name: darwin-arm64-release
+          name: ${{ matrix.target }}-release
           if-no-files-found: error
           path: |
-            release/*.dmg
-            release/*-darwin-arm64.tar.gz
-            release/update-darwin-arm64.json
+            release/*

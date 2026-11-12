@@ -4,7 +4,7 @@
 
 在 macOS 菜单栏听小宇宙。收起窗口后继续播放，不占 Dock，播放列表和收听进度保存在本机。
 
-支持 Apple Silicon Mac（M1 及后续机型）。
+构建目标：Apple Silicon Mac（M1 及后续机型）和 Windows 10/11 x64。Windows 安装包支持已加入构建流程，需完成 Windows CI 与实机验收后发布。
 
 [下载最新版](https://github.com/sgaxun/xiaoyuzhou-player/releases/latest) · [更新记录](CHANGELOG.md)
 
@@ -49,7 +49,7 @@
 
 ## 开始使用
 
-1. 下载最新版本的 DMG，将「小宇宙播放器」拖入「应用程序」并启动。
+1. macOS：下载 DMG，将「小宇宙播放器」拖入「应用程序」并启动。Windows：在 Release 提供 Windows 附件后，下载 `xiaoyuzhou-player-setup-<版本>-amd64.exe` 安装；需要 WebView2 Evergreen Runtime。
 2. 点击菜单栏图标，在「设置 → 账户」中使用小宇宙 App 扫码登录。
 3. 进入「订阅 → 全部订阅」，点击「拉取订阅」，同步关注的节目。
 4. 选择单集直接播放，或通过加号加入播放列表。
@@ -152,7 +152,7 @@
 
 ## 开发与发布
 
-应用使用 Go、React 和 MyGo 构建，音频播放使用系统 WebKit。
+应用使用 Go、React 和 MyGo 构建，macOS 音频播放使用系统 WebKit，Windows 使用 WebView2。
 
 - [开发与本地构建](docs/DEVELOPMENT.md)
 - [版本发布与更新签名](docs/RELEASING.md)

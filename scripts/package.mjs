@@ -1,17 +1,21 @@
-// Keep exactly one distributable DMG after a successful, verified build.
+// Package only on a supported native host; preserve other platforms in release/.
 import {spawnSync} from 'node:child_process';
 import {readFile,readdir,copyFile,unlink,mkdir,rm,writeFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import {join} from 'node:path';
+import {homedir} from 'node:os';
 const root=fileURLToPath(new URL('..',import.meta.url));
 const outputs=join(root,'release');
+const windows=process.platform==='win32';
+const targetPlatform=windows?'windows-amd64':'darwin-arm64';
+if(!((windows&&process.arch==='x64')||(process.platform==='darwin'&&process.arch==='arm64')))throw Error('Packaging requires Apple Silicon macOS or Windows x64');
 await mkdir(outputs,{recursive:true});
 const go=process.env.MYGO_GO||'go';
 const buildEnv={...process.env};
-if(buildEnv.MYGO_UPDATER_PRIVATE_KEY_FILE){if(buildEnv.MYGO_UPDATER_PRIVATE_KEY)throw Error('签名密钥来源只能设置一个');buildEnv.MYGO_UPDATER_PRIVATE_KEY=(await readFile(buildEnv.MYGO_UPDATER_PRIVATE_KEY_FILE,'utf8')).trim();delete buildEnv.MYGO_UPDATER_PRIVATE_KEY_FILE;}
+if(buildEnv.MYGO_UPDATER_PRIVATE_KEY_FILE){if(buildEnv.MYGO_UPDATER_PRIVATE_KEY)throw Error('签名密钥来源只能设置一个');buildEnv.MYGO_UPDATER_PRIVATE_KEY=(await readFile(buildEnv.MYGO_UPDATER_PRIVATE_KEY_FILE.startsWith('~/')?join(homedir(),buildEnv.MYGO_UPDATER_PRIVATE_KEY_FILE.slice(2)):buildEnv.MYGO_UPDATER_PRIVATE_KEY_FILE,'utf8')).trim();delete buildEnv.MYGO_UPDATER_PRIVATE_KEY_FILE;}
 function run(cmd,args){const p=spawnSync(cmd,args,{cwd:root,stdio:'inherit',env:buildEnv});if(p.error)throw p.error;if(p.status!==0)throw Error(`${cmd} failed (${p.status})`)}
 run(go,['run','./scripts/icon']);
-run('npm',['run','build:ui']);
+run(process.execPath,[process.env.npm_execpath||(()=>{throw Error('Run through npm run package')})(),'run','build:ui']);
 // Build from a clean staging directory.
 await rm(join(root,'resources/bin'),{recursive:true,force:true});
 if(process.platform==='darwin'){
@@ -22,9 +26,18 @@ if(process.platform==='darwin'){
  run('codesign',['--force','--sign','-',shareApp]);
 }
 await rm(join(root,'build'),{recursive:true,force:true});
-run(go,['run','github.com/egoist/mygo/cmd/mygo@v0.8.3','build','-skip-notarize']);
+run(go,['run','github.com/egoist/mygo/cmd/mygo@v0.8.3','build','-platform',windows?'windows/amd64':'darwin/arm64','-skip-notarize']);
 const {version,slug}=JSON.parse(await readFile(join(root,'mygo.json'),'utf8'));
-const build=join(root,'build/darwin-arm64');
+const build=join(root,`build/${targetPlatform}`);
+if(windows){
+ const names=[`${slug}-setup-${version}-amd64.exe`,'install.ps1'];
+ if(buildEnv.MYGO_UPDATER_PRIVATE_KEY)names.push(`update-${targetPlatform}.json`,`${slug}-${version}-${targetPlatform}.tar.gz`);
+ for(const name of names)await copyFile(join(build,name),join(outputs,name));
+ for(const name of await readdir(outputs)){
+  if((name.startsWith(`${slug}-setup-`)&&name.endsWith('-amd64.exe')||name.startsWith(`${slug}-`)&&name.endsWith('-windows-amd64.tar.gz')||name==='update-windows-amd64.json')&&!names.includes(name))await unlink(join(outputs,name));
+ }
+ console.log(`Windows installer: ${join(outputs,names[0])}`);
+}else{
 const name=`小宇宙播放器-${version}-AppleSilicon.dmg`;
 const source=join(build,`${slug}-${version}-arm64.dmg`);
 const target=join(outputs,name);
@@ -41,3 +54,5 @@ for(const file of await readdir(outputs)){
 for(const file of await readdir(outputs))if(/^小宇宙(?:播放器|菜单栏)-.*\.dmg$/u.test(file)&&file!==name)await unlink(join(outputs,file));
 for(const file of await readdir(build))if(/^(?:xiaoyuzhou-player|xiao-yu-zhou-cai-dan-lan)-.*\.dmg$/.test(file))await unlink(join(build,file));
 console.log(`仅保留最新 DMG：${target}`);
+
+}

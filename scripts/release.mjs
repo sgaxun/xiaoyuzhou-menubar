@@ -20,6 +20,8 @@ async function main() {
   }
   if (args.some(a => a !== '--draft') || args.length > 1) throw Error('仅支持 --draft 或 --help');
   const draft = args.includes('--draft');
+  const windows = process.platform === 'win32';
+  const target = windows ? 'windows-amd64' : 'darwin-arm64';
   const config = JSON.parse(await readFile(join(root, 'mygo.json'), 'utf8'));
   const pkg = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
   const version = config.version;
@@ -32,7 +34,7 @@ async function main() {
   const tag = `v${version}`;
   if (process.env.GITHUB_REF_TYPE === 'tag' && process.env.GITHUB_REF_NAME !== tag) throw Error('GitHub 标签与配置版本不匹配');
   if (process.env.GITHUB_ACTIONS === 'true' && process.env.GITHUB_REF_TYPE !== 'tag') throw Error('手动工作流必须选择版本标签运行');
-  if (process.platform !== 'darwin' || process.arch !== 'arm64') throw Error('需要 Apple Silicon macOS（darwin-arm64）构建机');
+  if (!((windows && process.arch === 'x64') || (process.platform === 'darwin' && process.arch === 'arm64'))) throw Error('需要 Apple Silicon macOS 或 Windows x64 构建机');
   const env = {...process.env};
   let secret = env.MYGO_UPDATER_PRIVATE_KEY;
   if (env.MYGO_UPDATER_PRIVATE_KEY_FILE) {
@@ -47,21 +49,26 @@ async function main() {
   env.MYGO_UPDATER_PRIVATE_KEY = secret;
   delete env.MYGO_UPDATER_PRIVATE_KEY_FILE;
   // Signing material goes only into the packaging child environment, never arguments or logs.
-  run('npm', ['run', 'package'], env);
+  run(process.execPath, [process.env.npm_execpath || (() => {throw Error('Run through npm run release')})(), 'run', 'package'], env);
   const output = join(root, 'release');
-  const manifestName = 'update-darwin-arm64.json';
+  const manifestName = `update-${target}.json`;
   const manifest = JSON.parse(await readFile(join(output, manifestName), 'utf8'));
   const url = new URL(manifest.url);
   const prefix = `https://github.com/${repo}/releases/download/${tag}/`;
   const archiveName = decodeURIComponent(url.pathname.split('/').at(-1));
-  if (manifest.version !== version || !manifest.url.startsWith(prefix) || !archiveName.endsWith(`-${version}-darwin-arm64.tar.gz`) || archiveName.includes('/') || archiveName.includes('\\') || manifest.deltas?.length) throw Error('更新 manifest 的版本、URL、归档名称或 deltas 不正确');
+  if (manifest.version !== version || !manifest.url.startsWith(prefix) || archiveName !== `${config.slug}-${version}-${target}.tar.gz` || archiveName.includes('/') || archiveName.includes('\\') || manifest.deltas?.length) throw Error('更新 manifest 的版本、URL、归档名称或 deltas 不正确');
   const archive = await readFile(join(output, archiveName));
   const keyObject = createPublicKey({key: Buffer.concat([Buffer.from('302a300506032b6570032100', 'hex'), pub]), format: 'der', type: 'spki'});
   if (archive.length !== manifest.size || !verify(null, createHash('sha256').update(archive).digest(), keyObject, Buffer.from(manifest.signature || '', 'base64'))) throw Error('更新归档大小或签名校验失败');
-  const dmgs = (await readdir(output)).filter(name => name.endsWith('.dmg') && name.includes(`-${version}-`));
-  if (dmgs.length !== 1 || !(await stat(join(output, dmgs[0]))).size) throw Error('release 目录必须包含当前版本唯一且非空的 DMG');
-  const assets = [dmgs[0], archiveName, manifestName].map(name => join(output, name));
-  if (!draft) { console.log(`已验证 ${tag} 的 DMG、签名更新归档及 manifest；未进行远端写入。`); return; }
+  const installerName = windows ? `${config.slug}-setup-${version}-amd64.exe` : `小宇宙播放器-${version}-AppleSilicon.dmg`;
+  if (!(await stat(join(output, installerName))).size) throw Error('release 目录缺少非空安装包');
+  if (!windows) {
+    const dmgs = (await readdir(output)).filter(name => name.endsWith('.dmg') && name.includes(`-${version}-`));
+    if (dmgs.length !== 1) throw Error('release 目录必须包含当前版本唯一 DMG');
+  }
+  const assets = [installerName, archiveName, manifestName, ...(windows ? ['install.ps1'] : [])].map(name => join(output, name));
+  for (const asset of assets) if (!(await stat(asset)).size) throw Error('release 目录存在空产物');
+  if (!draft) { console.log(`已验证 ${tag} ${target} 安装包、签名更新归档及 manifest；未进行远端写入。`); return; }
   const ghEnv = {...process.env};
   delete ghEnv.MYGO_UPDATER_PRIVATE_KEY;
   delete ghEnv.MYGO_UPDATER_PRIVATE_KEY_FILE;
@@ -76,7 +83,7 @@ async function main() {
   // retaining the Chinese local DMG name; the temporary copy is always removed.
   const staging = await mkdtemp(join(tmpdir(), 'xiaoyuzhou-release-'));
   try {
-    const installer = join(staging, `xiaoyuzhou-player-${version}-AppleSilicon.dmg`);
+    const installer = join(staging, windows ? installerName : `xiaoyuzhou-player-${version}-AppleSilicon.dmg`);
     await copyFile(assets[0], installer);
     assets[0] = installer;
     run('gh', ['release', 'upload', tag, ...assets, '--repo', repo, '--clobber'], ghEnv, true);
