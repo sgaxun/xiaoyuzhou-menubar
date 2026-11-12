@@ -2,7 +2,7 @@
   "name": "小宇宙播放器",
   "slug": "xiaoyuzhou-player",
   "identifier": "dev.sgaxun.xiaoyuzhou-menubar",
-  "version": "0.3.12",
+  "version": "0.3.13",
   "out": "build",
   "icon": "resources/icon.png",
   "macos": {
