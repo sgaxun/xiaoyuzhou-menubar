@@ -73,6 +73,11 @@ func (b *Backend) MediaState(title, artist string, playing bool, position, durat
 	b.mediaMu.Lock()
 	defer b.mediaMu.Unlock()
 	if title == "" {
+		if b.title != "" {
+			b.title = ""
+			mygo.NowPlaying.Clear()
+			b.tray.SetToolTip("小宇宙播放器 — 点击显示或隐藏播放器")
+		}
 		return
 	}
 	if b.title != title {

@@ -3,6 +3,7 @@ import {PodcastContext,PodcastLink} from './podcast-link.js';
 import {PodcastDetails} from './podcast-details.js';
 import {CoverPreview, openCover} from './cover-preview.js';
 import {queueEpisode,episodeImage,episodePodcast} from './episode.js';
+import {episodeFirst,removeQueueEpisode} from './queue-playback.js';
 import {SeekBar} from './seek-bar.js';
 import {Transcript} from './transcript.js';
 import {Comments} from './comments.js';
@@ -396,6 +397,8 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
           setPlayStatus('loading');
           const audio = audioRef.current;
           if (!audio) return;
+          setQueue(list => episodeFirst(list, episode));
+          setIndex(0);
           setCurrent(episode);
           currentRef.current=episode;
           const programKey=episode.subscriptionPid||episode.pid;
@@ -471,6 +474,7 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
               const waitSeekable = () =>
                 new Promise((done) => {
                   const check = () => {
+                    if(requestId!==playRequestRef.current)return done(false);
                     if (seekableReady()) return done(true);
                     if (Date.now() > deadline) return done(false);
                     setTimeout(check, 120);
@@ -480,8 +484,10 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
 
               const applyAndWait = () =>
                 new Promise((done) => {
+                  if(requestId!==playRequestRef.current)return done(false);
                   let tries = 0;
                   const tick = () => {
+                    if(requestId!==playRequestRef.current)return done(false);
                     if (Math.abs(el.currentTime - sec) < 2 && !el.seeking) return done(true);
                     if (tries++ > 30 || Date.now() > deadline) {
                       return done(false);
@@ -538,6 +544,7 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
 
             // 兜底：数据尚未加载时，先静音起播触发加载，再 seek。
             if (!ok) {
+              if(requestId!==playRequestRef.current)return;
               const wasMuted = audio.muted;
               audio.muted = true;
               try {
@@ -556,9 +563,11 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
           try {
             await audio.play();
           } catch (err) {
+            if(requestId!==playRequestRef.current)return;
             setError(`无法播放：${err.message}`);setPlayStatus('error');
           }
 
+          if(requestId!==playRequestRef.current)return;
           // play() 会重置倍速，这里重新应用。
           audio.playbackRate = effectiveRate;
           audio.volume = volume;
@@ -570,13 +579,34 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
       /** 播放队列中的第 i 集。 */
       const playAt = useCallback(
         (list, i, options = {}) => {
-          setQueue(list);
-          setIndex(i);
           const ep = list[i];
-          if (ep) play(ep, undefined, options);
+          if (!ep) return;
+          setQueue(episodeFirst(list, ep));
+          setIndex(0);
+          play(ep, undefined, options);
         },
         [play],
       );
+
+      const stopPlayback = useCallback(() => {
+        const audio=audioRef.current, episode=currentRef.current;
+        playRequestRef.current++;
+        if (episode && audio?.dataset.xyzEid===episode.eid) {
+          sendProgress(episode,audio.currentTime,true);
+          if(mediaEpisodeRef.current && !audio.ended)cloudReporter.current('paused',mediaEpisodeRef.current,audio.currentTime);
+        }
+        mediaEpisodeRef.current=null;pendingSeekRef.current=null;currentRef.current=null;
+        if(audio){audio.pause();audio.muted=false;audio.removeAttribute('src');delete audio.dataset.xyzEid;audio.load()}
+        setCurrent(null);setPlaying(false);setPosition(0);setDuration(0);setPlayStatus('idle');setError('');
+      },[sendProgress]);
+      const removeFromQueue = useCallback(eid => {
+        const removed=queue.find(item=>item.eid===eid);
+        removeQueueEpisode({queue,currentEid:currentRef.current?.eid,stop:stopPlayback,playAt,setQueue,setIndex},eid);
+        if(removed)call(`dropCache?eid=${encodeURIComponent(removed.eid)}&pid=${encodeURIComponent(removed.pid||'')}`).catch(()=>{});
+      },[queue,stopPlayback,playAt]);
+      const clearQueue = useCallback(() => {
+        stopPlayback();setQueue([]);setIndex(-1);
+      },[stopPlayback]);
 
       const toggle = useCallback(() => {
         const audio = audioRef.current;
@@ -679,6 +709,8 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
           const ep = mediaEpisodeRef.current;
           if (ep && audio.dataset.xyzEid === ep.eid) cloudReporter.current('playing', ep, audio.currentTime);
           setPlaying(true);
+          const selected=currentRef.current;
+          if(selected){setQueue(list=>episodeFirst(list,selected));setIndex(0)}
           const eid = currentRef.current?.eid;
           if (eid) retryRef.current[eid] = 0;
           // 起播瞬间再校正一次倍速，兜住浏览器的延迟重置。
@@ -727,6 +759,7 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
         };
         const onErr = async () => {
           if (!audio.error) return;
+          const requestId=playRequestRef.current;
           const ep = currentRef.current;
           const eid = ep?.eid;
 
@@ -739,10 +772,12 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
               try {
                 const r = await apiFetch(`${API}/audioUrl?eid=${encodeURIComponent(eid)}&refresh=1`);
                 const d = await r.json();
+                if(requestId!==playRequestRef.current || currentRef.current?.eid!==eid)return;
                 if (d?.ok && d.url && d.url !== audio.src) {
                   audio.src = d.url;
                   audio.dataset.xyzEid = eid;
                   audio.addEventListener('loadedmetadata', () => {
+                    if(requestId!==playRequestRef.current || currentRef.current?.eid!==eid)return;
                     try {
                       audio.currentTime = resumeAt;
                     } catch {
@@ -750,6 +785,7 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
                     }
                   }, { once: true });
                   await audio.play().catch(() => {});
+                  if(requestId!==playRequestRef.current)return;
                   setError('');
                   return;
                 }
@@ -758,7 +794,7 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
               }
             }
           }
-          setPlayStatus('error');setError('音频加载失败，可点击重试');
+          if(requestId===playRequestRef.current){setPlayStatus('error');setError('音频加载失败，可点击重试')}
         };
         const onWaiting=()=>{if(!audio.paused)setPlayStatus('buffering')};
         const onPlaying=()=>{setPlayStatus('playing');setError('')};
@@ -843,7 +879,7 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
         playStatus,retry,sleepMode,setSleepMode,sleepRemaining,changeRate,
         audioRef, progressRef, current, setCurrent, queue, setQueue, index, setIndex,
         playing, position, duration, rate, volume, error, setError, setRate, setVolume,
-        play, playAt, toggle, step, seek, cycleRate, changeVolume,
+        play, playAt, removeFromQueue, clearQueue, toggle, step, seek, cycleRate, changeVolume,
         sendProgress,
       };
     }
@@ -1534,9 +1570,7 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
                         {
                           className: 'xyz-btn',
                           onClick: () => {
-                            player.setQueue([]);
-                            player.setIndex(-1);
-                            player.setCurrent(null);
+                            player.clearQueue();
                           },
                         },
                         '清空',
@@ -1632,14 +1666,7 @@ const playerRef = {current:null}; const listeners=new Set(); const mountedRef={c
                           title: '移出播放列表',
                           onClick: (e) => {
                             e.stopPropagation();
-                            const next = player.queue.filter((_, idx) => idx !== k);
-                            const removed = player.queue[k];
-                            player.setQueue(next);
-                            if (removed) {
-                              call(`dropCache?eid=${encodeURIComponent(removed.eid)}&pid=${encodeURIComponent(removed.pid || '')}`).catch(() => {});
-                            }
-                            if (k < player.index) player.setIndex(player.index - 1);
-                            else if (k === player.index) player.setIndex(Math.min(player.index, next.length - 1));
+                            player.removeFromQueue(ep.eid);
                           },
                         },
                         h(
