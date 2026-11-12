@@ -30,6 +30,16 @@ run(go,['run','github.com/egoist/mygo/cmd/mygo@v0.8.3','build','-platform',windo
 const {version,slug}=JSON.parse(await readFile(join(root,'mygo.json'),'utf8'));
 const build=join(root,`build/${targetPlatform}`);
 if(windows){
+ // The generated download script must agree with our NSIS Program Files policy.
+ const installScript=join(build,'install.ps1');
+ let ps=await readFile(installScript,'utf8');
+ const oldDefault="$defaultFolder = Join-Path $env:LOCALAPPDATA ('Programs\\' + 'XiaoyuzhouPlayer')";
+ if(!ps.includes(oldDefault)||!ps.includes(').InstallLocation')||!ps.includes('Start-Process -FilePath $setup -ArgumentList'))throw Error('MyGo Windows install script changed; review Program Files policy');
+ ps=ps.replace(oldDefault,"$defaultFolder = Join-Path $env:ProgramW6432 'XiaoyuzhouPlayer'")
+  .replace(').InstallLocation',').ProgramFilesInstallLocation')
+  .replace('Start-Process -FilePath $setup -ArgumentList','Start-Process -FilePath $setup -Verb RunAs -ArgumentList')
+  .replace('# Installs the app for the current user:', '# Installs the app in Program Files with administrator approval:');
+ await writeFile(installScript,ps);
  const names=[`${slug}-setup-${version}-amd64.exe`,'install.ps1'];
  if(buildEnv.MYGO_UPDATER_PRIVATE_KEY)names.push(`update-${targetPlatform}.json`,`${slug}-${version}-${targetPlatform}.tar.gz`);
  for(const name of names)await copyFile(join(build,name),join(outputs,name));

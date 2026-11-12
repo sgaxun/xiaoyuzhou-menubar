@@ -237,6 +237,7 @@ func trayIcon() []byte {
 }
 
 func main() {
+	handlePrivilegedUpdate()
 	dir, err := defaultDataDir()
 	if err != nil {
 		log.Fatal("定位播放器数据失败：", err)

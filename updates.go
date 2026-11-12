@@ -24,8 +24,11 @@ func currentVersion() string {
 
 type updateDriver struct{}
 
-func (updateDriver) Enabled() bool { return mygo.Updater.Enabled() }
+func (updateDriver) Enabled() bool { return platformUpdatesEnabled() }
 func (updateDriver) Check(ctx context.Context) (appupdate.Candidate, error) {
+	return platformCheckUpdate(ctx)
+}
+func nativeCheckUpdate(ctx context.Context) (appupdate.Candidate, error) {
 	up, err := mygo.Updater.Check(ctx)
 	if up == nil || err != nil {
 		return nil, err

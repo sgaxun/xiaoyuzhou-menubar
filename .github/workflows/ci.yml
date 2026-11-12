@@ -62,16 +62,16 @@ jobs:
           & go run ./scripts/checkarchive $archive $dir ($c.name + '.exe')
           if ($LASTEXITCODE -ne 0) { throw 'Cannot extract and verify update archive' }
           $setup = Resolve-Path "release/$($c.slug)-setup-$($c.version)-amd64.exe"
-          # NSIS silent install creates per-user files and does not launch the app.
-          $dest = Join-Path $env:RUNNER_TEMP 'xiaoyuzhou-install'
-          $p = Start-Process -FilePath $setup -ArgumentList @('/S',"/D=$dest") -Wait -PassThru
+          # Verify the real default (no /D override), including Program Files access.
+          $dest = Join-Path $env:ProgramW6432 'XiaoyuzhouPlayer'
+          $p = Start-Process -FilePath $setup -ArgumentList @('/S') -Wait -PassThru
           if ($p.ExitCode -ne 0 -or !(Test-Path (Join-Path $dest ($c.name + '.exe')))) { throw 'Silent installation failed' }
       - name: Smoke installed Windows app (bridge, audio and image clipboard)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $c = Get-Content mygo.json | ConvertFrom-Json
-          $exe = Join-Path $env:RUNNER_TEMP "xiaoyuzhou-install/$($c.name).exe"
+          $exe = Join-Path $env:ProgramW6432 "XiaoyuzhouPlayer/$($c.name).exe"
           $env:XIAOYUZHOU_MENUBAR_DATA_DIR = Join-Path $env:RUNNER_TEMP 'xiaoyuzhou-smoke-data'
           $env:XIAOYUZHOU_NATIVE_SMOKE_RESULT = Join-Path $env:RUNNER_TEMP 'xiaoyuzhou-smoke-result.json'
           New-Item -ItemType Directory -Force $env:XIAOYUZHOU_MENUBAR_DATA_DIR | Out-Null

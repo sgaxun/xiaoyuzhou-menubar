@@ -14,5 +14,9 @@
     "github": "sgaxun/xiaoyuzhou-player",
     "publicKey": "FIjEkm0aBlT2fKHplH0bcw0kPejm2G0DiPW4PNq7Hkk=",
     "deltas": 0
+  },
+  "windows": {
+    "installDirName": "XiaoyuzhouPlayer",
+    "installerInclude": "native/windows/installer.nsh"
   }
 }

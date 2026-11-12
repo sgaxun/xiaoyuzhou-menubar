@@ -51,3 +51,5 @@ MYGO_GO=/absolute/path/to/go npm run package
 | `scripts/` | 界面构建、测试和打包发布脚本 |
 
 构建产物、依赖目录和个人账号数据不提交到仓库。调试时可通过 `XIAOYUZHOU_MENUBAR_DATA_DIR` 指定独立数据目录，避免影响日常使用的数据。
+
+Windows 安装包默认安装到 `C:\Program Files\XiaoyuzhouPlayer`（系统 Program Files 位于其他盘时跟随系统），安装和卸载需要管理员权限。程序仍使用普通权限启动，账户与播放数据仍按用户保存在 AppData。普通权限下的更新检查不触发 UAC；用户点击安装更新时，由管理员辅助进程重新读取内置更新源、匹配版本并使用原有公钥校验归档，再写入 Program Files。旧 AppData 安装的记忆路径不会覆盖新默认位置；手动选择路径或 `/D=` 参数仍有效。
