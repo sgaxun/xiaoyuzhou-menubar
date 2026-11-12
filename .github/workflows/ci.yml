@@ -59,9 +59,8 @@ jobs:
           $bytes = [IO.File]::ReadAllBytes((Resolve-Path $exe))
           if ($bytes[0] -ne 77 -or $bytes[1] -ne 90) { throw 'Not a PE executable' }
           $archive = "release/$($c.slug)-$($c.version)-windows-amd64.tar.gz"
-          $entries = & tar -tzf $archive
-          if ($LASTEXITCODE -ne 0) { throw 'Cannot read update archive' }
-          if (!($entries | Where-Object { $_ -match '\.exe$' })) { throw 'Update archive lacks application executable' }
+          & go run ./scripts/checkarchive $archive $dir ($c.name + '.exe')
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot extract and verify update archive' }
           $setup = Resolve-Path "release/$($c.slug)-setup-$($c.version)-amd64.exe"
           # NSIS silent install creates per-user files and does not launch the app.
           $dest = Join-Path $env:RUNNER_TEMP 'xiaoyuzhou-install'
