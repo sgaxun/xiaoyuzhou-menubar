@@ -28,7 +28,6 @@ npm run package
 
 Windows 使用同样的 `npm ci`、`npm test`、`npm run package`，不编译 Swift 分享助手，不运行 codesign/hdiutil。MyGo 显式使用 `-platform windows/amd64`，不传 `-skip-installer`，确保 NSIS 安装包实际生成。只分发安装包，不单独分发缺少附属文件的裸 EXE。无更新签名密钥时仅产出安装包和安装脚本；签名更新包见发布流程。
 
-PR/分支的 Native build validation 工作流在 macOS 和 Windows 原生运行测试及完整打包，以临时生成的密钥校验更新归档；Windows 另检查 PE 文件和归档内容，并静默安装到临时目录验证安装文件。临时公钥仅写入 CI 工作区，临时签名归档不能作为正式更新发布。Windows 在检查后恢复仓库正式公钥并重新打包安装包，Windows artifact 中的安装包可供试用，但不包含可发布的签名更新归档。Windows CI 随后启动已安装程序，设置隔离的 `XIAOYUZHOU_MENUBAR_DATA_DIR` 和 `XIAOYUZHOU_NATIVE_SMOKE_RESULT`，最多等待 90 秒并要求结果 JSON 的 `ok` 为 true；原生探针检查页面桥接、音频播放和图片剪贴板，finally 终止应用进程树。结果作为 artifact 保留。普通启动不设置该变量。CI 不替代托盘人工交互及真实更新重启验收。
 
 若 Go 不在 PATH 中，可指定路径：
 
