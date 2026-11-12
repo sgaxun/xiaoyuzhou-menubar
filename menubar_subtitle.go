@@ -71,7 +71,7 @@ func subtitleFontPaths() []string {
 		return []string{filepath.Join(fonts, "msyh.ttc"), filepath.Join(fonts, "msyh.ttf"), filepath.Join(fonts, "msjh.ttc"), filepath.Join(fonts, "simhei.ttf"), filepath.Join(fonts, "simsun.ttc"), filepath.Join(fonts, "segoeui.ttf")}
 	}
 	paths, _ := filepath.Glob("/System/Library/AssetsV2/com_apple_MobileAsset_Font*/*/AssetData/PingFang.ttc")
-	return append(paths, "/System/Library/Fonts/PingFang.ttc", "/System/Library/Fonts/STHeiti Light.ttc")
+	return append(paths, "/System/Library/Fonts/PingFang.ttc", "/System/Library/Fonts/STHeiti Light.ttc", "/System/Library/Fonts/Hiragino Sans GB.ttc", "/System/Library/Fonts/Supplemental/Arial Unicode.ttf", "/System/Library/Fonts/Supplemental/Songti.ttc")
 }
 
 const subtitleWidth, subtitleHeight, subtitleLeft = 476, 36, 48

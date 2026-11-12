@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -48,7 +49,8 @@ func TestStateCompatibilityAndPersistence(t *testing.T) {
 		t.Fatal(s2.state)
 	}
 	info, _ := os.Stat(filepath.Join(dir, "state.json"))
-	if info.Mode().Perm() != 0600 {
+	// Windows exposes synthetic mode bits; access follows the user-profile ACL.
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0600 {
 		t.Fatal(info.Mode())
 	}
 }
