@@ -8,7 +8,10 @@ export function QueueIcon({next=false}) {
 }
 export function QueueAdd({episode,player,disabled=false,onAdd}) {
   const [menu,setMenu]=useState(null),[busy,setBusy]=useState(false),[error,setError]=useState('');
-  const anchor=useRef(null),popup=useRef(null);
+  const anchor=useRef(null),popup=useRef(null),press=useRef(null),suppressClick=useRef(false);
+  const cancelPress=()=>{if(press.current)clearTimeout(press.current.timer);press.current=null};
+  useEffect(()=>cancelPress,[]);
+  const openMenu=()=>{const r=anchor.current.getBoundingClientRect();setMenu({left:Math.max(8,Math.min(r.right-150,window.innerWidth-158)),top:r.bottom+5,above:r.bottom+100>window.innerHeight})};
   const queued=player.queue.some(ep=>ep.eid===episode.eid)||player.current?.eid===episode.eid;
   const close=()=>{setMenu(null);anchor.current?.focus()};
   useEffect(()=>{
@@ -22,14 +25,20 @@ export function QueueAdd({episode,player,disabled=false,onAdd}) {
   const add=async where=>{
     if(busy)return;setBusy(true);setError('');
     try{if(onAdd)await onAdd(where);else player.enqueue(episode,where);close()}
-    catch(err){setError(err.message||'加入失败，请重试')}
+    catch(err){setError(err.message||'加入失败，请重试');openMenu()}
     finally{setBusy(false)}
   };
   return h(React.Fragment,null,
-    h('button',{ref:anchor,type:'button',className:queued?'xyz-row-action added':'xyz-row-action',disabled:disabled||busy||queued,title:queued?'已在播放列表':'加入播放列表','aria-label':queued?'已在播放列表':'加入播放列表','aria-haspopup':'menu','aria-expanded':!!menu,onClick:e=>{e.stopPropagation();if(menu){close();return}const r=e.currentTarget.getBoundingClientRect();setMenu({left:Math.max(8,Math.min(r.right-150,window.innerWidth-158)),top:r.bottom+5,above:r.bottom+100>window.innerHeight})}},
+    h('button',{ref:anchor,type:'button',className:queued?'xyz-row-action added':'xyz-row-action',disabled:disabled||busy||queued,title:queued?'已在播放列表':'单击加入队尾；长按下一集播放（右键可选择）','aria-label':queued?'已在播放列表':'加入队尾，长按下一集播放','aria-haspopup':'menu','aria-expanded':!!menu,
+      onPointerDown:e=>{e.stopPropagation();if(e.button!==0)return;cancelPress();suppressClick.current=false;const {clientX:x,clientY:y}=e;press.current={x,y,timer:setTimeout(()=>{press.current=null;suppressClick.current=true;void add('next')},500)}},
+      onPointerMove:e=>{if(press.current&&Math.hypot(e.clientX-press.current.x,e.clientY-press.current.y)>8){cancelPress();suppressClick.current=true}},
+      onPointerUp:cancelPress,onPointerCancel:()=>{cancelPress();suppressClick.current=true},onPointerLeave:()=>{if(press.current){cancelPress();suppressClick.current=true}},
+      onContextMenu:e=>{e.preventDefault();e.stopPropagation();cancelPress();if(!suppressClick.current)openMenu()},
+      onKeyDown:e=>{if(e.key==='ContextMenu'||(e.shiftKey&&e.key==='F10')){e.preventDefault();e.stopPropagation();openMenu()}},
+      onClick:e=>{e.stopPropagation();if(suppressClick.current&&e.detail!==0){suppressClick.current=false;return}cancelPress();void add('end')}},
       h('svg',{width:14,height:14,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:2,'aria-hidden':true},h('path',{d:queued?'M4 12.5l5 5L20 6.5':'M12 5v14M5 12h14'}))),
     menu?createPortal(h('div',{ref:popup,role:'menu','aria-label':'加入播放列表',className:'xyz-queue-menu',style:{left:menu.left,...(menu.above?{bottom:Math.max(8,window.innerHeight-menu.top+32)}:{top:menu.top})},onClick:e=>e.stopPropagation(),onKeyDown:e=>{e.stopPropagation();if(e.key==='Escape'){e.preventDefault();close()}if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();const items=[...popup.current.querySelectorAll('button')];const i=items.indexOf(document.activeElement);items[(i+(e.key==='ArrowDown'?1:items.length-1))%items.length]?.focus()}if(e.key==='Tab')setMenu(null)}},
-      h('button',{type:'button',role:'menuitem',disabled:busy,onClick:()=>add('next')},h(QueueIcon,{next:true}),'下一集播放'),
       h('button',{type:'button',role:'menuitem',disabled:busy,onClick:()=>add('end')},h(QueueIcon,{}),'加入队尾'),
+      h('button',{type:'button',role:'menuitem',disabled:busy,onClick:()=>add('next')},h(QueueIcon,{next:true}),'下一集播放'),
       error?h('div',{role:'alert',className:'xyz-hint'},error):null),document.body):null);
 }
